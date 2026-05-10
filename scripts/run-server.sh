@@ -16,6 +16,8 @@ exec "$BIN" \
   -ngl "$GPU_LAYERS" \
   -fa on \
   --reasoning "$REASONING" \
+  -np "$PARALLEL_SLOTS" \
+  --cache-ram "$CACHE_RAM_MB" \
   -b "$BATCH_SIZE" \
   -ub "$UBATCH_SIZE" \
   --host "$HOST" \

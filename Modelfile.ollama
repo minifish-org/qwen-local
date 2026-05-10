@@ -1,0 +1,4 @@
+FROM /Users/yusp/.cache/huggingface/hub/models--Qwen--Qwen3-4B-GGUF/snapshots/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf
+
+PARAMETER num_ctx 16384
+PARAMETER temperature 0.0

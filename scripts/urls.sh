@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/config/model.env"
+
+echo "Local:"
+echo "  http://127.0.0.1:${PORT}/v1"
+
+if command -v tailscale >/dev/null 2>&1; then
+  TS_IP="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$TS_IP" ]]; then
+    echo "Tailscale:"
+    echo "  http://${TS_IP}:${PORT}/v1"
+  fi
+fi
+
+echo "Model:"
+echo "  ${MODEL_HF}"
