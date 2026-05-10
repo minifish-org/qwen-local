@@ -68,6 +68,22 @@ To check that the server is responding:
 ./scripts/health.sh
 ```
 
+## Launchd
+
+Install a user-level LaunchAgent so the server starts when you log in:
+
+```sh
+./scripts/install-launchd.sh
+```
+
+Remove it:
+
+```sh
+./scripts/uninstall-launchd.sh
+```
+
+Logs are written under `logs/`.
+
 ## Benchmark
 
 ```sh
