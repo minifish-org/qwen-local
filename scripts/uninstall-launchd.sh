@@ -15,5 +15,5 @@ uninstall_one() {
   echo "Uninstalled $label"
 }
 
-uninstall_one "org.minifish.qwen4b-local"
-uninstall_one "org.minifish.qwen4b-local-embedding"
+uninstall_one "org.minifish.qwen-local"
+uninstall_one "org.minifish.qwen-local-embedding"

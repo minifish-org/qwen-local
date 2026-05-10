@@ -1,4 +1,4 @@
-# qwen4b-local
+# qwen-local
 
 Local setup for Qwen3-4B Q4_K_M on a 16 GB Apple Silicon Mac.
 

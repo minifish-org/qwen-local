@@ -1,4 +1,4 @@
-# qwen4b-local
+# qwen-local
 
 OpenAI-compatible local Qwen3-4B service for a 16 GB Apple Silicon Mac.
 

@@ -4,15 +4,15 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>org.minifish.qwen4b-local</string>
+  <string>org.minifish.qwen-local</string>
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/yusp/work/qwen4b-local/scripts/run-server.sh</string>
+    <string>/Users/yusp/work/qwen-local/scripts/run-server.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/yusp/work/qwen4b-local</string>
+  <string>/Users/yusp/work/qwen-local</string>
 
   <key>RunAtLoad</key>
   <true/>
@@ -21,10 +21,10 @@
   <true/>
 
   <key>StandardOutPath</key>
-  <string>/Users/yusp/work/qwen4b-local/logs/launchd.out.log</string>
+  <string>/Users/yusp/work/qwen-local/logs/launchd.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/yusp/work/qwen4b-local/logs/launchd.err.log</string>
+  <string>/Users/yusp/work/qwen-local/logs/launchd.err.log</string>
 
   <key>EnvironmentVariables</key>
   <dict>

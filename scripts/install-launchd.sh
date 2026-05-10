@@ -44,8 +44,8 @@ install_one() {
   echo "Installed and started $label"
 }
 
-install_one "org.minifish.qwen4b-local"
-install_one "org.minifish.qwen4b-local-embedding"
+install_one "org.minifish.qwen-local"
+install_one "org.minifish.qwen-local-embedding"
 
 echo "Logs:"
 echo "  $ROOT/logs/launchd.out.log"

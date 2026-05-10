@@ -4,15 +4,15 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>org.minifish.qwen4b-local-embedding</string>
+  <string>org.minifish.qwen-local-embedding</string>
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/yusp/work/qwen4b-local/scripts/run-embedding-server.sh</string>
+    <string>/Users/yusp/work/qwen-local/scripts/run-embedding-server.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/yusp/work/qwen4b-local</string>
+  <string>/Users/yusp/work/qwen-local</string>
 
   <key>RunAtLoad</key>
   <true/>
@@ -21,10 +21,10 @@
   <true/>
 
   <key>StandardOutPath</key>
-  <string>/Users/yusp/work/qwen4b-local/logs/launchd-embedding.out.log</string>
+  <string>/Users/yusp/work/qwen-local/logs/launchd-embedding.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/yusp/work/qwen4b-local/logs/launchd-embedding.err.log</string>
+  <string>/Users/yusp/work/qwen-local/logs/launchd-embedding.err.log</string>
 
   <key>EnvironmentVariables</key>
   <dict>
