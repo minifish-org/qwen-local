@@ -4,13 +4,16 @@ OpenAI-compatible local Qwen3-4B service for a 16 GB Apple Silicon Mac.
 
 This project is a small wrapper around `llama.cpp`, not a faster replacement
 for Ollama. Its value is a simple, transparent local OpenAI-compatible endpoint
-for a fixed Qwen3-4B GGUF model that is easy to use over Tailscale.
+for fixed local chat and embedding GGUF models that are easy to use over
+Tailscale.
 
 Baseline:
 
 - Runtime: llama.cpp
-- Model: `Qwen/Qwen3-4B-GGUF:Q4_K_M`
+- Chat model: `Qwen/Qwen3-4B-GGUF:Q4_K_M`
+- Embedding model: `Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0`
 - Context: 16384 tokens
+- Embedding context: 8192 tokens
 - Backend: Metal
 - Flash attention: on
 - Reasoning: off by default
@@ -35,13 +38,15 @@ Hugging Face loader.
 Local server URL on this Mac:
 
 ```text
-http://127.0.0.1:8000/v1
+Chat:      http://127.0.0.1:8000/v1
+Embedding: http://127.0.0.1:8001/v1
 ```
 
 From another device on the same Tailscale network, use this Mac's Tailscale IP:
 
 ```text
-http://<mac-tailscale-ip>:8000/v1
+Chat:      http://<mac-tailscale-ip>:8000/v1
+Embedding: http://<mac-tailscale-ip>:8001/v1
 ```
 
 On this Mac, the current Tailscale IPv4 address can usually be checked with:
@@ -50,10 +55,11 @@ On this Mac, the current Tailscale IPv4 address can usually be checked with:
 tailscale ip -4
 ```
 
-Model ID:
+Model IDs:
 
 ```text
-Qwen/Qwen3-4B-GGUF:Q4_K_M
+Chat:      Qwen/Qwen3-4B-GGUF:Q4_K_M
+Embedding: Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0
 ```
 
 To print the local and Tailscale URLs:
@@ -66,6 +72,23 @@ To check that the server is responding:
 
 ```sh
 ./scripts/health.sh
+```
+
+To test the embedding endpoint:
+
+```sh
+./scripts/test-embedding.sh
+```
+
+Embedding request example:
+
+```sh
+curl http://127.0.0.1:8001/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0",
+    "input": "hello local embeddings"
+  }'
 ```
 
 ## Launchd

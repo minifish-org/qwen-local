@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LABEL="org.minifish.qwen4b-local"
-DST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 DOMAIN="gui/$(id -u)"
 
-if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
-  launchctl bootout "$DOMAIN/$LABEL"
-fi
+uninstall_one() {
+  local label="$1"
+  local dst="$HOME/Library/LaunchAgents/${label}.plist"
 
-rm -f "$DST"
+  if launchctl print "$DOMAIN/$label" >/dev/null 2>&1; then
+    launchctl bootout "$DOMAIN/$label"
+  fi
 
-echo "Uninstalled $LABEL"
+  rm -f "$dst"
+  echo "Uninstalled $label"
+}
+
+uninstall_one "org.minifish.qwen4b-local"
+uninstall_one "org.minifish.qwen4b-local-embedding"
