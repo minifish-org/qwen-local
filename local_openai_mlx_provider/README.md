@@ -15,7 +15,7 @@ calling, agents, ASR, TTS, OCR, image generation, or VLM workflows.
 
 ```sh
 cd /Users/yusp/work/qwen-local
-python3 -m venv .venv-mlx
+python3.12 -m venv .venv-mlx
 source .venv-mlx/bin/activate
 pip install -r local_openai_mlx_provider/requirements.txt
 ```
@@ -41,7 +41,14 @@ MAX_CONTEXT_TOKENS=8192 \
 python -m local_openai_mlx_provider.server
 ```
 
-The first request for each capability loads its model lazily.
+Or run it directly with uvicorn:
+
+```sh
+uvicorn local_openai_mlx_provider.server:app --host 127.0.0.1 --port 11435
+```
+
+The first request for each capability loads its model lazily. The first run may
+download model files; inference itself runs locally after the models are cached.
 
 ## OpenAI Client
 

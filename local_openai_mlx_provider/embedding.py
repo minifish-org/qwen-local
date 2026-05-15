@@ -11,6 +11,7 @@ class EmbeddingRuntime:
         self._settings = settings
         self._model = None
         self._processor = None
+        self._generate = None
         self._lock = threading.Lock()
 
     def _load(self) -> None:
@@ -22,31 +23,40 @@ class EmbeddingRuntime:
                 return
 
             try:
-                from mlx_embeddings import load
+                from mlx_embeddings import generate, load
             except ImportError as exc:
                 raise RuntimeError(
                     "mlx-embeddings is not installed. Install requirements.txt first."
                 ) from exc
 
+            self._generate = generate
             self._model, self._processor = load(self._settings.embedding_model)
 
     def embed(self, texts: Iterable[str]) -> list[list[float]]:
         self._load()
         assert self._model is not None
         assert self._processor is not None
+        assert self._generate is not None
 
-        items = [{"text": text} for text in texts]
-
-        if hasattr(self._model, "process"):
-            vectors = self._model.process(items, processor=self._processor)
-        elif hasattr(self._model, "encode"):
-            vectors = self._model.encode([item["text"] for item in items])
-        else:
-            raise RuntimeError(
-                "Embedding model does not expose a supported process/encode API."
-            )
+        output = self._generate(
+            self._model,
+            self._processor,
+            list(texts),
+            max_length=512,
+            padding=True,
+            truncation=True,
+        )
+        vectors = _extract_vectors(output)
 
         return _to_float_lists(vectors)
+
+
+def _extract_vectors(output):
+    if hasattr(output, "text_embeds") and output.text_embeds is not None:
+        return output.text_embeds
+    if hasattr(output, "pooler_output") and output.pooler_output is not None:
+        return output.pooler_output
+    return output
 
 
 def _to_float_lists(vectors) -> list[list[float]]:
@@ -62,4 +72,3 @@ def _to_float_lists(vectors) -> list[list[float]]:
         raw = [raw]
 
     return [[float(v) for v in row] for row in raw]
-
