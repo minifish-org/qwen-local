@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 
 from .config import Settings
 from .openai_types import ChatMessage
@@ -61,6 +62,40 @@ class LLMRuntime:
         )
         return "".join(getattr(chunk, "text", str(chunk)) for chunk in chunks).strip()
 
+    def stream(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float,
+        max_tokens: int,
+    ) -> Iterator[str]:
+        self._load()
+        assert self._model is not None
+        assert self._tokenizer is not None
+
+        prompt = self._render_prompt(messages)
+
+        try:
+            from mlx_lm import stream_generate
+            from mlx_lm.sample_utils import make_sampler
+        except ImportError as exc:
+            raise RuntimeError(
+                "mlx-lm is not installed. Install requirements.txt first."
+            ) from exc
+
+        sampler = make_sampler(temp=temperature)
+        chunks = stream_generate(
+            self._model,
+            self._tokenizer,
+            prompt,
+            max_tokens=max_tokens,
+            sampler=sampler,
+        )
+        for chunk in chunks:
+            text = getattr(chunk, "text", str(chunk))
+            if text:
+                yield text
+
     def _render_prompt(self, messages: list[ChatMessage]) -> str:
         tokenizer = self._tokenizer
         rendered = [{"role": m.role, "content": m.content} for m in messages]
@@ -73,6 +108,7 @@ class LLMRuntime:
                         rendered,
                         tokenize=False,
                         add_generation_prompt=True,
+                        enable_thinking=False,
                     )
                 )
             except TypeError:

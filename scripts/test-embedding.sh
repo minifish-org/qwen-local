@@ -4,12 +4,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/config/model.env"
 
-BASE_URL="${EMBEDDING_BASE_URL:-http://127.0.0.1:${EMBEDDING_PORT}}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:${PORT}}"
 
 curl -fsS "${BASE_URL}/v1/embeddings" \
   -H "Content-Type: application/json" \
   -d "{
-    \"model\":\"${EMBEDDING_MODEL_HF}\",
+    \"model\":\"${API_EMBEDDING_MODEL}\",
     \"input\":\"hello local embeddings\"
   }" | python3 -c '
 import json, sys

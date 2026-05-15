@@ -8,10 +8,13 @@ from dataclasses import dataclass
 class Settings:
     llm_model: str = "mlx-community/Qwen3.5-4B-MLX-4bit"
     embedding_model: str = "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
-    host: str = "127.0.0.1"
-    port: int = 11435
+    host: str = "0.0.0.0"
+    port: int = 8000
     max_context_tokens: int = 8192
     default_max_tokens: int = 512
+    default_temperature: float = 0.0
+    api_llm_model: str = "local-llm"
+    api_embedding_model: str = "local-embedding"
 
 
 def get_settings() -> Settings:
@@ -26,5 +29,11 @@ def get_settings() -> Settings:
         default_max_tokens=int(
             os.getenv("DEFAULT_MAX_TOKENS", str(Settings.default_max_tokens))
         ),
+        default_temperature=float(
+            os.getenv("DEFAULT_TEMPERATURE", str(Settings.default_temperature))
+        ),
+        api_llm_model=os.getenv("API_LLM_MODEL", Settings.api_llm_model),
+        api_embedding_model=os.getenv(
+            "API_EMBEDDING_MODEL", Settings.api_embedding_model
+        ),
     )
-

@@ -1,33 +1,33 @@
 # qwen-local
 
-OpenAI-compatible local Qwen3-4B service for a 16 GB Apple Silicon Mac.
+OpenAI-compatible local Qwen service for a 16 GB Apple Silicon Mac.
 
-This project is a small wrapper around `llama.cpp`, not a faster replacement
-for Ollama. Its value is a simple, transparent local OpenAI-compatible endpoint
-for fixed local chat and embedding GGUF models that are easy to use over
-Tailscale.
+This project is a thin FastAPI adapter around local MLX models. It runs chat
+and embeddings in one process, on one port, with no external API calls during
+inference after models are cached.
 
-Baseline:
+## Defaults
 
-- Runtime: llama.cpp
-- Chat model: `Qwen/Qwen3-4B-GGUF:Q4_K_M`
-- Embedding model: `Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0`
-- Context: 16384 tokens
-- Embedding context: 8192 tokens
-- Backend: Metal
-- Flash attention: on
-- Reasoning: off by default
-- Server slots: 1
-- Prompt cache RAM cap: 2048 MiB
+- Runtime: MLX / mlx-lm
+- Chat model: `mlx-community/Qwen3.5-4B-MLX-4bit`
+- Embedding model: `mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`
+- API URL: `http://127.0.0.1:8000/v1`
+- Tailscale URL: `http://<mac-tailscale-ip>:8000/v1`
+- Chat API model: `local-llm`
+- Embedding API model: `local-embedding`
+- Context: 8192 tokens
+- Default temperature: 0
+- Streaming chat: supported
+- Thinking: disabled in the Qwen chat template
 
 ## Setup
 
 ```sh
-./scripts/setup-llama.sh
+./scripts/setup.sh
 ```
 
-The first server or benchmark run downloads the GGUF through llama.cpp's
-Hugging Face loader.
+The first chat or embedding request may download model files from Hugging Face.
+After that, inference runs locally from the model cache.
 
 ## Run
 
@@ -35,60 +35,50 @@ Hugging Face loader.
 ./scripts/run-server.sh
 ```
 
-Local server URL on this Mac:
-
-```text
-Chat:      http://127.0.0.1:8000/v1
-Embedding: http://127.0.0.1:8001/v1
-```
-
-From another device on the same Tailscale network, use this Mac's Tailscale IP:
-
-```text
-Chat:      http://<mac-tailscale-ip>:8000/v1
-Embedding: http://<mac-tailscale-ip>:8001/v1
-```
-
-On this Mac, the current Tailscale IPv4 address can usually be checked with:
-
-```sh
-tailscale ip -4
-```
-
-Model IDs:
-
-```text
-Chat:      Qwen/Qwen3-4B-GGUF:Q4_K_M
-Embedding: Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0
-```
-
-To print the local and Tailscale URLs:
+Check URLs and model names:
 
 ```sh
 ./scripts/urls.sh
 ```
 
-To check that the server is responding:
+Check that the server is responding:
 
 ```sh
 ./scripts/health.sh
 ```
 
-To test the embedding endpoint:
+Test embeddings:
 
 ```sh
 ./scripts/test-embedding.sh
 ```
 
-Embedding request example:
+## OpenAI Client
 
-```sh
-curl http://127.0.0.1:8001/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0",
-    "input": "hello local embeddings"
-  }'
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8000/v1",
+    api_key="local",
+)
+
+chat_resp = client.chat.completions.create(
+    model="local-llm",
+    messages=[{"role": "user", "content": "用一句话解释 KV cache。"}],
+    max_tokens=128,
+    stream=True,
+)
+
+for chunk in chat_resp:
+    text = chunk.choices[0].delta.content or ""
+    print(text, end="")
+
+embed_resp = client.embeddings.create(
+    model="local-embedding",
+    input=["OceanBase capacity sizing"],
+)
+print(len(embed_resp.data[0].embedding))
 ```
 
 ## Launchd
@@ -106,33 +96,3 @@ Remove it:
 ```
 
 Logs are written under `logs/`.
-
-## Benchmark
-
-```sh
-./scripts/bench.sh
-```
-
-For a one-pass 16k prompt benchmark:
-
-```sh
-./scripts/bench-16k.sh
-```
-
-For a small tuning matrix:
-
-```sh
-./scripts/bench-matrix.sh
-```
-
-Best local benchmark result so far on an M4 16 GB MacBook:
-
-- `pp2048`: about 337 tok/s
-- `tg128`: about 37 tok/s
-- Short API generation: about 38 tok/s
-
-Ollama with the same GGUF is roughly comparable for raw generation speed, so
-this setup is mainly about API compatibility and explicit configuration rather
-than a major throughput win.
-
-More details are in `notes/setup.md`.

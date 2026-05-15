@@ -3,52 +3,33 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOMAIN="gui/$(id -u)"
+LABEL="org.minifish.qwen-local"
+LEGACY_LABEL="org.minifish.qwen-local-embedding"
+SRC="$ROOT/launchd/${LABEL}.plist"
+DST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 
 if [[ ! -x "$ROOT/scripts/run-server.sh" ]]; then
   echo "Missing executable server script: $ROOT/scripts/run-server.sh" >&2
   exit 1
 fi
 
-if [[ ! -x "$ROOT/scripts/run-embedding-server.sh" ]]; then
-  echo "Missing executable embedding server script: $ROOT/scripts/run-embedding-server.sh" >&2
-  exit 1
-fi
-
-if [[ ! -x "$ROOT/llama.cpp/build/bin/llama-server" ]]; then
-  echo "llama-server is not built yet. Run ./scripts/setup-llama.sh first." >&2
-  exit 1
-fi
-
 mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/logs"
+cp "$SRC" "$DST"
 
-install_one() {
-  local label="$1"
-  local src="$ROOT/launchd/${label}.plist"
-  local dst="$HOME/Library/LaunchAgents/${label}.plist"
+if launchctl print "$DOMAIN/$LEGACY_LABEL" >/dev/null 2>&1; then
+  launchctl bootout "$DOMAIN/$LEGACY_LABEL" >/dev/null 2>&1 || true
+fi
+rm -f "$HOME/Library/LaunchAgents/${LEGACY_LABEL}.plist"
 
-  if [[ ! -f "$src" ]]; then
-    echo "Missing plist template: $src" >&2
-    exit 1
-  fi
+if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
+  launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+fi
 
-  cp "$src" "$dst"
+launchctl bootstrap "$DOMAIN" "$DST"
+launchctl enable "$DOMAIN/$LABEL"
+launchctl kickstart -k "$DOMAIN/$LABEL"
 
-  if launchctl print "$DOMAIN/$label" >/dev/null 2>&1; then
-    launchctl bootout "$DOMAIN/$label" >/dev/null 2>&1 || true
-  fi
-
-  launchctl bootstrap "$DOMAIN" "$dst"
-  launchctl enable "$DOMAIN/$label"
-  launchctl kickstart -k "$DOMAIN/$label"
-
-  echo "Installed and started $label"
-}
-
-install_one "org.minifish.qwen-local"
-install_one "org.minifish.qwen-local-embedding"
-
+echo "Installed and started $LABEL"
 echo "Logs:"
 echo "  $ROOT/logs/launchd.out.log"
 echo "  $ROOT/logs/launchd.err.log"
-echo "  $ROOT/logs/launchd-embedding.out.log"
-echo "  $ROOT/logs/launchd-embedding.err.log"
