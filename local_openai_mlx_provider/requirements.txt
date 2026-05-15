@@ -1,0 +1,7 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+mlx>=0.29
+mlx-lm>=0.28
+mlx-embeddings>=0.0.4
+

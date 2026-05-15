@@ -1,6 +1,9 @@
 llama.cpp/
 models/
 logs/
+.venv*/
+__pycache__/
+*.pyc
 .DS_Store
 *.log
 *.pid
