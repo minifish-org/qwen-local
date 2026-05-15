@@ -19,6 +19,7 @@ inference after models are cached.
 - Default temperature: 0
 - Streaming chat: supported
 - Thinking: disabled in the Qwen chat template
+- Inference worker: single serialized worker for chat and embeddings
 
 ## Setup
 
@@ -51,6 +52,24 @@ Test embeddings:
 
 ```sh
 ./scripts/test-embedding.sh
+```
+
+Run an application-style OpenAI compatibility check:
+
+```sh
+./scripts/test-openai-app.sh
+```
+
+For apps that ask for a base API URL without the OpenAI suffix, use:
+
+```text
+http://127.0.0.1:8000
+```
+
+For OpenAI SDKs, use:
+
+```text
+http://127.0.0.1:8000/v1
 ```
 
 ## OpenAI Client
@@ -96,3 +115,14 @@ Remove it:
 ```
 
 Logs are written under `logs/`.
+
+## Stability Notes
+
+The service intentionally runs local inference through one shared worker. Chat
+and embedding requests are serialized so a 16 GB Mac does not try to run
+multiple MLX generations at the same time. Concurrent clients will wait their
+turn.
+
+Defaults favor predictable local behavior: temperature is `0`, Qwen thinking is
+disabled in the chat template, chat and embeddings share one process and one
+port, and launchd writes stdout/stderr logs under `logs/`.

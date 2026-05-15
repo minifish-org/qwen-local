@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -24,6 +25,7 @@ settings = get_settings()
 app = FastAPI(title="local-openai-mlx-provider", version="0.1.0")
 llm_runtime = LLMRuntime(settings)
 embedding_runtime = EmbeddingRuntime(settings)
+inference_lock = threading.Lock()
 
 
 @app.exception_handler(Exception)
@@ -35,12 +37,29 @@ async def generic_exception_handler(_: Request, exc: Exception) -> JSONResponse:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "runtime": "mlx",
+        "single_worker": True,
+        "busy": inference_lock.locked(),
+        "chat_model": settings.api_llm_model,
+        "embedding_model": settings.api_embedding_model,
+    }
+
+
+@app.get("/")
+def root() -> dict[str, Any]:
+    return _service_info()
+
+
+@app.get("/v1")
+def v1_root() -> dict[str, Any]:
+    return _service_info()
 
 
 @app.get("/v1/models")
-async def models() -> ModelList:
+def models() -> ModelList:
     return ModelList(
         data=[
             ModelObject(id=settings.api_llm_model),
@@ -50,7 +69,7 @@ async def models() -> ModelList:
 
 
 @app.post("/v1/chat/completions")
-async def chat_completions(req: ChatCompletionRequest):
+def chat_completions(req: ChatCompletionRequest):
     if req.model != settings.api_llm_model:
         return _bad_request(f"unsupported chat model: {req.model}", param="model")
 
@@ -66,11 +85,12 @@ async def chat_completions(req: ChatCompletionRequest):
             media_type="text/event-stream",
         )
 
-    content = llm_runtime.complete(
-        req.messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
+    with inference_lock:
+        content = llm_runtime.complete(
+            req.messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
     payload: dict[str, Any] = {
         "id": f"chatcmpl-local-{uuid.uuid4().hex}",
@@ -111,25 +131,26 @@ def _chat_stream(
     }
     yield _sse(first_chunk)
 
-    for text in llm_runtime.stream(
-        req.messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-    ):
-        payload = {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": req.model,
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"content": text},
-                    "finish_reason": None,
-                }
-            ],
-        }
-        yield _sse(payload)
+    with inference_lock:
+        for text in llm_runtime.stream(
+            req.messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        ):
+            payload = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": req.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": text},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            yield _sse(payload)
 
     final_chunk = {
         "id": completion_id,
@@ -143,7 +164,7 @@ def _chat_stream(
 
 
 @app.post("/v1/embeddings")
-async def embeddings(req: EmbeddingsRequest) -> JSONResponse:
+def embeddings(req: EmbeddingsRequest) -> JSONResponse:
     if req.model != settings.api_embedding_model:
         return _bad_request(f"unsupported embedding model: {req.model}", param="model")
 
@@ -151,7 +172,8 @@ async def embeddings(req: EmbeddingsRequest) -> JSONResponse:
     if not inputs:
         return _bad_request("input must not be empty", param="input")
 
-    vectors = embedding_runtime.embed(inputs)
+    with inference_lock:
+        vectors = embedding_runtime.embed(inputs)
 
     payload = {
         "object": "list",
@@ -181,6 +203,18 @@ def _bad_request(message: str, *, param: Optional[str] = None) -> JSONResponse:
 
 def _sse(payload: dict[str, Any]) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _service_info() -> dict[str, Any]:
+    return {
+        "name": "qwen-local",
+        "runtime": "mlx",
+        "openai_base_url": f"http://127.0.0.1:{settings.port}/v1",
+        "models": {
+            "chat": settings.api_llm_model,
+            "embedding": settings.api_embedding_model,
+        },
+    }
 
 
 def main() -> None:
