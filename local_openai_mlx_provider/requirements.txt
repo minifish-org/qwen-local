@@ -5,3 +5,5 @@ mlx>=0.29
 mlx-lm>=0.28
 mlx-embeddings>=0.0.4
 kokoro-mlx>=0.1.0
+mlx-whisper>=0.4.3
+python-multipart>=0.0.28

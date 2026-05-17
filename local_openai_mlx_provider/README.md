@@ -8,13 +8,14 @@ It exposes:
 - `POST /v1/chat/completions`
 - `POST /v1/embeddings`
 - `POST /v1/audio/speech`
+- `POST /v1/audio/transcriptions`
 
-Chat and embedding inference share one serialized worker to keep memory usage
-predictable on 16 GB Macs. TTS uses the same process and worker when the
-service is launched through the repository launchd setup.
+Chat, embedding, TTS, and ASR inference share one serialized worker to keep
+memory usage predictable on 16 GB Macs. TTS and ASR use the same process and
+worker when the service is launched through the repository launchd setup.
 
 It intentionally does not implement `/v1/responses`, `/v1/rerank`, RAG, vector
-storage, tool calling, agents, ASR, streaming audio, OCR, image generation, or
-VLM workflows.
+storage, tool calling, agents, streaming audio, OCR, image generation, or VLM
+workflows.
 
 See the repository README for setup, launchd, and client examples.

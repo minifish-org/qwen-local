@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import uuid
 from collections.abc import Iterator
+from tempfile import NamedTemporaryFile
 from typing import Any, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from .asr import LocalASRProvider
 from .config import get_settings
 from .embedding import EmbeddingRuntime
 from .llm import LLMRuntime
@@ -29,6 +32,7 @@ app = FastAPI(title="local-openai-mlx-provider", version="0.1.0")
 llm_runtime = LLMRuntime(settings)
 embedding_runtime = EmbeddingRuntime(settings)
 tts_runtime = LocalTTSProvider(settings)
+asr_runtime = LocalASRProvider(settings)
 inference_lock = threading.Lock()
 
 
@@ -64,6 +68,7 @@ def health() -> dict[str, Any]:
         "chat_model": settings.api_llm_model,
         "embedding_model": settings.api_embedding_model,
         "tts_model": settings.api_tts_model,
+        "asr_model": settings.api_asr_model,
     }
 
 
@@ -84,6 +89,7 @@ def models() -> ModelList:
             ModelObject(id=settings.api_llm_model),
             ModelObject(id=settings.api_embedding_model),
             ModelObject(id=settings.api_tts_model),
+            ModelObject(id=settings.api_asr_model),
         ]
     )
 
@@ -247,6 +253,63 @@ def audio_speech(req: AudioSpeechRequest):
     return Response(content=audio, media_type="audio/wav")
 
 
+@app.post("/v1/audio/transcriptions")
+async def audio_transcriptions(
+    file: UploadFile = File(...),
+    model: str = Form(...),
+    language: Optional[str] = Form(None),
+    prompt: Optional[str] = Form(None),
+    response_format: Optional[str] = Form(None),
+    temperature: Optional[float] = Form(None),
+):
+    if model not in {settings.api_asr_model, settings.asr_model}:
+        return _bad_request(f"unsupported ASR model: {model}", param="model")
+
+    effective_format = response_format or settings.asr_response_format
+    if effective_format not in {"json", "text"}:
+        return _bad_request(
+            f"unsupported response_format: {effective_format}. Supported formats: json, text",
+            param="response_format",
+        )
+
+    effective_temperature = 0.0 if temperature is None else temperature
+    if not isinstance(effective_temperature, (int, float)) or effective_temperature < 0:
+        return _bad_request(
+            "temperature must be a non-negative number", param="temperature"
+        )
+
+    audio = await file.read()
+    if not audio:
+        return _bad_request("file must be a non-empty audio file", param="file")
+
+    suffix = _upload_suffix(file.filename)
+    temp_path = ""
+    try:
+        with NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_file.write(audio)
+            temp_path = temp_file.name
+
+        with inference_lock:
+            text = asr_runtime.transcribe(
+                audio_path=temp_path,
+                language=language,
+                prompt=prompt,
+                response_format=effective_format,
+                temperature=float(effective_temperature),
+            )
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+
+    if effective_format == "text":
+        return Response(content=text, media_type="text/plain")
+
+    return JSONResponse({"text": text})
+
+
 def _bad_request(message: str, *, param: Optional[str] = None) -> JSONResponse:
     return JSONResponse(
         status_code=400,
@@ -267,8 +330,17 @@ def _service_info() -> dict[str, Any]:
             "chat": settings.api_llm_model,
             "embedding": settings.api_embedding_model,
             "tts": settings.api_tts_model,
+            "asr": settings.api_asr_model,
         },
     }
+
+
+def _upload_suffix(filename: Optional[str]) -> str:
+    if not filename:
+        return ".audio"
+
+    _, suffix = os.path.splitext(filename)
+    return suffix or ".audio"
 
 
 def main() -> None:

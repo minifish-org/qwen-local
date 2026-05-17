@@ -2,9 +2,10 @@
 
 OpenAI-compatible local Qwen service for a 16 GB Apple Silicon Mac.
 
-This project is a thin FastAPI adapter around local MLX models. It runs chat
-embeddings, and Kokoro text-to-speech in one process, on one port, with no
-external API calls during inference after models are cached.
+This project is a thin FastAPI adapter around local MLX models. It runs chat,
+embeddings, Kokoro text-to-speech, and Whisper speech-to-text in one process,
+on one port, with no external API calls during inference after models are
+cached.
 
 ## Defaults
 
@@ -15,6 +16,10 @@ external API calls during inference after models are cached.
 - TTS model alias: `local-tts`
 - TTS default voice: `af_heart` (`"default"` maps to this voice)
 - TTS format: `wav` at 24000 Hz
+- ASR backend: `mlx-whisper`
+- ASR model: `mlx-community/whisper-small-mlx`
+- ASR model alias: `local-asr`
+- ASR format: `json`
 - API URL: `http://127.0.0.1:8000/v1`
 - Tailscale URL: `http://<mac-tailscale-ip>:8000/v1`
 - Chat API model: `local-llm`
@@ -23,7 +28,7 @@ external API calls during inference after models are cached.
 - Default temperature: 0
 - Streaming chat: supported
 - Thinking: disabled in the Qwen chat template
-- Inference worker: single serialized worker for chat and embeddings
+- Inference worker: single serialized worker for chat, embeddings, TTS, and ASR
 
 ## Setup
 
@@ -33,10 +38,16 @@ external API calls during inference after models are cached.
 
 Required Python dependencies are listed in
 `local_openai_mlx_provider/requirements.txt`, including `mlx`, `mlx-lm`,
-`mlx-embeddings`, and `kokoro-mlx`.
+`mlx-embeddings`, `kokoro-mlx`, `mlx-whisper`, and `python-multipart`.
 
-The first chat, embedding, or TTS request may download model files from Hugging
-Face. After that, inference runs locally from the model cache.
+ASR also requires `ffmpeg` on the host so Whisper can read common audio formats:
+
+```sh
+brew install ffmpeg
+```
+
+The first chat, embedding, TTS, or ASR request may download model files from
+Hugging Face. After that, inference runs locally from the model cache.
 
 ## Run
 
@@ -68,6 +79,12 @@ Test TTS:
 ./scripts/test-tts.sh
 ```
 
+Test ASR with a local audio file:
+
+```sh
+./scripts/test-asr.sh
+```
+
 Generate local Kokoro speech:
 
 ```sh
@@ -82,6 +99,16 @@ curl http://127.0.0.1:8000/v1/audio/speech \
     "speed": 1.0
   }' \
   --output speech.wav
+```
+
+Transcribe local audio:
+
+```sh
+curl http://127.0.0.1:8000/v1/audio/transcriptions \
+  -H "Authorization: Bearer local" \
+  -F model=local-asr \
+  -F file=@speech.wav \
+  -F response_format=json
 ```
 
 Run an application-style OpenAI compatibility check:
@@ -139,10 +166,18 @@ speech_resp = client.audio.speech.create(
 
 with open("speech.wav", "wb") as f:
     f.write(speech_resp.read())
+
+with open("speech.wav", "rb") as f:
+    transcription = client.audio.transcriptions.create(
+        model="local-asr",
+        file=f,
+        response_format="json",
+    )
+print(transcription.text)
 ```
 
 Any OpenAI-compatible client should point at `http://127.0.0.1:8000/v1` and use
-`local-llm`, `local-embedding`, or `local-tts` as the model name.
+`local-llm`, `local-embedding`, `local-tts`, or `local-asr` as the model name.
 
 ## Launchd
 
@@ -154,7 +189,7 @@ log in:
 ```
 
 The LaunchAgent runs `scripts/run-server.sh`, which reads `config/model.env`.
-Chat, embeddings, and TTS are served by that one process on the same port.
+Chat, embeddings, TTS, and ASR are served by that one process on the same port.
 
 Remove it:
 
@@ -166,14 +201,14 @@ Logs are written under `logs/`.
 
 ## Stability Notes
 
-The service intentionally runs local inference through one shared worker. Chat
-and embedding requests are serialized so a 16 GB Mac does not try to run
-multiple MLX generations at the same time. Concurrent clients will wait their
-turn.
+The service intentionally runs local inference through one shared worker. Chat,
+embedding, TTS, and ASR requests are serialized so a 16 GB Mac does not try to
+run multiple MLX generations at the same time. Concurrent clients will wait
+their turn.
 
 Defaults favor predictable local behavior: temperature is `0`, Qwen thinking is
-disabled in the chat template, chat, embeddings, and TTS share one process and
-one port, and launchd writes stdout/stderr logs under `logs/`.
+disabled in the chat template, all local model capabilities share one process
+and one port, and launchd writes stdout/stderr logs under `logs/`.
 
 ## TTS Limitations
 
@@ -183,3 +218,13 @@ one port, and launchd writes stdout/stderr logs under `logs/`.
 - Long text chunking for audiobook-style generation is not implemented.
 - Kokoro English quality is the main target.
 - Chinese support should be treated as experimental unless tested locally.
+
+## ASR Limitations
+
+- v0.1 supports transcription only, not translation.
+- JSON output is the default; plain text output is also supported.
+- Realtime ASR and streaming ASR are not implemented.
+- Speaker diarization is not implemented.
+- Long-audio chunking is not implemented.
+- Whisper small is the default target for Mac M4 16 GB.
+- Chinese and English should both be tested locally for your target audio.

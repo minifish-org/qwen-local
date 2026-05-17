@@ -13,6 +13,10 @@ class Settings:
     tts_default_voice: str = "af_heart"
     tts_response_format: str = "wav"
     tts_sample_rate: int = 24000
+    asr_model: str = "mlx-community/whisper-small-mlx"
+    asr_backend: str = "mlx-whisper"
+    asr_default_language: str = ""
+    asr_response_format: str = "json"
     host: str = "0.0.0.0"
     port: int = 8000
     max_context_tokens: int = 8192
@@ -21,6 +25,7 @@ class Settings:
     api_llm_model: str = "local-llm"
     api_embedding_model: str = "local-embedding"
     api_tts_model: str = "local-tts"
+    api_asr_model: str = "local-asr"
 
 
 def get_settings() -> Settings:
@@ -34,6 +39,14 @@ def get_settings() -> Settings:
             "TTS_RESPONSE_FORMAT", Settings.tts_response_format
         ),
         tts_sample_rate=int(os.getenv("TTS_SAMPLE_RATE", str(Settings.tts_sample_rate))),
+        asr_model=os.getenv("ASR_MODEL", Settings.asr_model),
+        asr_backend=os.getenv("ASR_BACKEND", Settings.asr_backend),
+        asr_default_language=os.getenv(
+            "ASR_DEFAULT_LANGUAGE", Settings.asr_default_language
+        ),
+        asr_response_format=os.getenv(
+            "ASR_RESPONSE_FORMAT", Settings.asr_response_format
+        ),
         host=os.getenv("HOST", Settings.host),
         port=int(os.getenv("PORT", str(Settings.port))),
         max_context_tokens=int(
@@ -50,4 +63,5 @@ def get_settings() -> Settings:
             "API_EMBEDDING_MODEL", Settings.api_embedding_model
         ),
         api_tts_model=os.getenv("API_TTS_MODEL", Settings.api_tts_model),
+        api_asr_model=os.getenv("API_ASR_MODEL", Settings.api_asr_model),
     )
