@@ -8,24 +8,42 @@ from collections.abc import Iterator
 from typing import Any, Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from .config import get_settings
 from .embedding import EmbeddingRuntime
 from .llm import LLMRuntime
 from .openai_types import (
+    AudioSpeechRequest,
     ChatCompletionRequest,
     EmbeddingsRequest,
     ModelList,
     ModelObject,
     error_payload,
 )
+from .tts import LocalTTSProvider
 
 settings = get_settings()
 app = FastAPI(title="local-openai-mlx-provider", version="0.1.0")
 llm_runtime = LLMRuntime(settings)
 embedding_runtime = EmbeddingRuntime(settings)
+tts_runtime = LocalTTSProvider(settings)
 inference_lock = threading.Lock()
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    _: Request, exc: RequestValidationError
+) -> JSONResponse:
+    first_error = exc.errors()[0] if exc.errors() else {}
+    location = first_error.get("loc", [])
+    param = str(location[-1]) if location else None
+    message = str(first_error.get("msg", "invalid request"))
+    return JSONResponse(
+        status_code=400,
+        content=error_payload(message, code="bad_request", param=param),
+    )
 
 
 @app.exception_handler(Exception)
@@ -45,6 +63,7 @@ def health() -> dict[str, Any]:
         "busy": inference_lock.locked(),
         "chat_model": settings.api_llm_model,
         "embedding_model": settings.api_embedding_model,
+        "tts_model": settings.api_tts_model,
     }
 
 
@@ -64,6 +83,7 @@ def models() -> ModelList:
         data=[
             ModelObject(id=settings.api_llm_model),
             ModelObject(id=settings.api_embedding_model),
+            ModelObject(id=settings.api_tts_model),
         ]
     )
 
@@ -194,6 +214,39 @@ def embeddings(req: EmbeddingsRequest) -> JSONResponse:
     return JSONResponse(payload)
 
 
+@app.post("/v1/audio/speech")
+def audio_speech(req: AudioSpeechRequest):
+    if req.model not in {settings.api_tts_model, settings.tts_model}:
+        return _bad_request(f"unsupported TTS model: {req.model}", param="model")
+
+    text = req.input.strip() if isinstance(req.input, str) else ""
+    if not text:
+        return _bad_request("input must be a non-empty string", param="input")
+
+    response_format = req.response_format or settings.tts_response_format
+    if response_format != "wav":
+        return _bad_request(
+            f"unsupported response_format: {response_format}. Supported formats: wav",
+            param="response_format",
+        )
+
+    speed = 1.0 if req.speed is None else req.speed
+    if not isinstance(speed, (int, float)) or speed <= 0:
+        return _bad_request("speed must be a positive number", param="speed")
+
+    voice = req.voice or settings.tts_default_voice
+
+    with inference_lock:
+        audio = tts_runtime.speech(
+            text=text,
+            voice=voice,
+            response_format=response_format,
+            speed=float(speed),
+        )
+
+    return Response(content=audio, media_type="audio/wav")
+
+
 def _bad_request(message: str, *, param: Optional[str] = None) -> JSONResponse:
     return JSONResponse(
         status_code=400,
@@ -213,6 +266,7 @@ def _service_info() -> dict[str, Any]:
         "models": {
             "chat": settings.api_llm_model,
             "embedding": settings.api_embedding_model,
+            "tts": settings.api_tts_model,
         },
     }
 

@@ -34,6 +34,14 @@ class EmbeddingsRequest(BaseModel):
     input: Union[str, list[str]]
 
 
+class AudioSpeechRequest(BaseModel):
+    model: str
+    input: str
+    voice: Optional[str] = None
+    response_format: Optional[str] = None
+    speed: Optional[float] = None
+
+
 class ModelObject(BaseModel):
     id: str
     object: str = "model"

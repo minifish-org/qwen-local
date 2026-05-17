@@ -3,14 +3,18 @@
 OpenAI-compatible local Qwen service for a 16 GB Apple Silicon Mac.
 
 This project is a thin FastAPI adapter around local MLX models. It runs chat
-and embeddings in one process, on one port, with no external API calls during
-inference after models are cached.
+embeddings, and Kokoro text-to-speech in one process, on one port, with no
+external API calls during inference after models are cached.
 
 ## Defaults
 
 - Runtime: MLX / mlx-lm
 - Chat model: `mlx-community/Qwen3.5-4B-MLX-4bit`
 - Embedding model: `mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`
+- TTS backend: `kokoro-mlx`
+- TTS model alias: `local-tts`
+- TTS default voice: `af_heart` (`"default"` maps to this voice)
+- TTS format: `wav` at 24000 Hz
 - API URL: `http://127.0.0.1:8000/v1`
 - Tailscale URL: `http://<mac-tailscale-ip>:8000/v1`
 - Chat API model: `local-llm`
@@ -27,8 +31,12 @@ inference after models are cached.
 ./scripts/setup.sh
 ```
 
-The first chat or embedding request may download model files from Hugging Face.
-After that, inference runs locally from the model cache.
+Required Python dependencies are listed in
+`local_openai_mlx_provider/requirements.txt`, including `mlx`, `mlx-lm`,
+`mlx-embeddings`, and `kokoro-mlx`.
+
+The first chat, embedding, or TTS request may download model files from Hugging
+Face. After that, inference runs locally from the model cache.
 
 ## Run
 
@@ -52,6 +60,28 @@ Test embeddings:
 
 ```sh
 ./scripts/test-embedding.sh
+```
+
+Test TTS:
+
+```sh
+./scripts/test-tts.sh
+```
+
+Generate local Kokoro speech:
+
+```sh
+curl http://127.0.0.1:8000/v1/audio/speech \
+  -H "Authorization: Bearer local" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "local-tts",
+    "input": "Hello, this is a local Kokoro text to speech test.",
+    "voice": "default",
+    "response_format": "wav",
+    "speed": 1.0
+  }' \
+  --output speech.wav
 ```
 
 Run an application-style OpenAI compatibility check:
@@ -98,15 +128,33 @@ embed_resp = client.embeddings.create(
     input=["OceanBase capacity sizing"],
 )
 print(len(embed_resp.data[0].embedding))
+
+speech_resp = client.audio.speech.create(
+    model="local-tts",
+    voice="default",
+    input="Hello from local Kokoro text to speech.",
+    response_format="wav",
+    speed=1.0,
+)
+
+with open("speech.wav", "wb") as f:
+    f.write(speech_resp.read())
 ```
+
+Any OpenAI-compatible client should point at `http://127.0.0.1:8000/v1` and use
+`local-llm`, `local-embedding`, or `local-tts` as the model name.
 
 ## Launchd
 
-Install a user-level LaunchAgent so the server starts when you log in:
+Install one user-level LaunchAgent so the same local API server starts when you
+log in:
 
 ```sh
 ./scripts/install-launchd.sh
 ```
+
+The LaunchAgent runs `scripts/run-server.sh`, which reads `config/model.env`.
+Chat, embeddings, and TTS are served by that one process on the same port.
 
 Remove it:
 
@@ -124,5 +172,14 @@ multiple MLX generations at the same time. Concurrent clients will wait their
 turn.
 
 Defaults favor predictable local behavior: temperature is `0`, Qwen thinking is
-disabled in the chat template, chat and embeddings share one process and one
-port, and launchd writes stdout/stderr logs under `logs/`.
+disabled in the chat template, chat, embeddings, and TTS share one process and
+one port, and launchd writes stdout/stderr logs under `logs/`.
+
+## TTS Limitations
+
+- v0.1 supports `wav` output only.
+- Audio speech generation is non-streaming.
+- Voice cloning and reference audio upload are not implemented.
+- Long text chunking for audiobook-style generation is not implemented.
+- Kokoro English quality is the main target.
+- Chinese support should be treated as experimental unless tested locally.

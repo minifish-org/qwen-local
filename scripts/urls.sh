@@ -18,3 +18,4 @@ fi
 echo "Models:"
 echo "  Chat:      ${API_LLM_MODEL} (${LLM_MODEL})"
 echo "  Embedding: ${API_EMBEDDING_MODEL} (${EMBEDDING_MODEL})"
+echo "  TTS:       ${API_TTS_MODEL} (${TTS_BACKEND}, voice=${TTS_DEFAULT_VOICE}, format=${TTS_RESPONSE_FORMAT})"
