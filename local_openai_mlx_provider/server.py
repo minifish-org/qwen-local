@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -28,6 +29,7 @@ from .openai_types import (
 from .tts import LocalTTSProvider
 
 settings = get_settings()
+logger = logging.getLogger("uvicorn.error")
 app = FastAPI(title="local-openai-mlx-provider", version="0.1.0")
 llm_runtime = LLMRuntime(settings)
 embedding_runtime = EmbeddingRuntime(settings)
@@ -106,17 +108,32 @@ def chat_completions(req: ChatCompletionRequest):
     temperature = settings.default_temperature if req.temperature is None else req.temperature
 
     if req.stream:
+        lock_start = _acquire_inference_lock("chat_stream")
+        if lock_start is None:
+            return _busy_response("chat_stream")
+
         return StreamingResponse(
-            _chat_stream(req, temperature=temperature, max_tokens=max_tokens),
+            _chat_stream(
+                req,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                lock_start=lock_start,
+            ),
             media_type="text/event-stream",
         )
 
-    with inference_lock:
+    lock_start = _acquire_inference_lock("chat")
+    if lock_start is None:
+        return _busy_response("chat")
+
+    try:
         content = llm_runtime.complete(
             req.messages,
             temperature=temperature,
             max_tokens=max_tokens,
         )
+    finally:
+        _release_inference_lock("chat", lock_start)
 
     payload: dict[str, Any] = {
         "id": f"chatcmpl-local-{uuid.uuid4().hex}",
@@ -143,7 +160,11 @@ def chat_completions(req: ChatCompletionRequest):
 
 
 def _chat_stream(
-    req: ChatCompletionRequest, *, temperature: float, max_tokens: int
+    req: ChatCompletionRequest,
+    *,
+    temperature: float,
+    max_tokens: int,
+    lock_start: float,
 ) -> Iterator[str]:
     completion_id = f"chatcmpl-local-{uuid.uuid4().hex}"
     created = int(time.time())
@@ -155,9 +176,9 @@ def _chat_stream(
         "model": req.model,
         "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
     }
-    yield _sse(first_chunk)
+    try:
+        yield _sse(first_chunk)
 
-    with inference_lock:
         for text in llm_runtime.stream(
             req.messages,
             temperature=temperature,
@@ -178,15 +199,20 @@ def _chat_stream(
             }
             yield _sse(payload)
 
-    final_chunk = {
-        "id": completion_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": req.model,
-        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-    }
-    yield _sse(final_chunk)
-    yield "data: [DONE]\n\n"
+        final_chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": req.model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        yield _sse(final_chunk)
+        yield "data: [DONE]\n\n"
+    except GeneratorExit:
+        logger.warning("chat_stream client disconnected before completion")
+        raise
+    finally:
+        _release_inference_lock("chat_stream", lock_start)
 
 
 @app.post("/v1/embeddings")
@@ -198,8 +224,14 @@ def embeddings(req: EmbeddingsRequest) -> JSONResponse:
     if not inputs:
         return _bad_request("input must not be empty", param="input")
 
-    with inference_lock:
+    lock_start = _acquire_inference_lock("embeddings")
+    if lock_start is None:
+        return _busy_response("embeddings")
+
+    try:
         vectors = embedding_runtime.embed(inputs)
+    finally:
+        _release_inference_lock("embeddings", lock_start)
 
     payload = {
         "object": "list",
@@ -242,19 +274,25 @@ def audio_speech(req: AudioSpeechRequest):
 
     voice = req.voice or settings.tts_default_voice
 
-    with inference_lock:
+    lock_start = _acquire_inference_lock("tts")
+    if lock_start is None:
+        return _busy_response("tts")
+
+    try:
         audio = tts_runtime.speech(
             text=text,
             voice=voice,
             response_format=response_format,
             speed=float(speed),
         )
+    finally:
+        _release_inference_lock("tts", lock_start)
 
     return Response(content=audio, media_type="audio/wav")
 
 
 @app.post("/v1/audio/transcriptions")
-async def audio_transcriptions(
+def audio_transcriptions(
     file: UploadFile = File(...),
     model: str = Form(...),
     language: Optional[str] = Form(None),
@@ -278,7 +316,7 @@ async def audio_transcriptions(
             "temperature must be a non-negative number", param="temperature"
         )
 
-    audio = await file.read()
+    audio = file.file.read()
     if not audio:
         return _bad_request("file must be a non-empty audio file", param="file")
 
@@ -289,7 +327,11 @@ async def audio_transcriptions(
             temp_file.write(audio)
             temp_path = temp_file.name
 
-        with inference_lock:
+        lock_start = _acquire_inference_lock("asr")
+        if lock_start is None:
+            return _busy_response("asr")
+
+        try:
             text = asr_runtime.transcribe(
                 audio_path=temp_path,
                 language=language,
@@ -297,6 +339,8 @@ async def audio_transcriptions(
                 response_format=effective_format,
                 temperature=float(effective_temperature),
             )
+        finally:
+            _release_inference_lock("asr", lock_start)
     finally:
         if temp_path:
             try:
@@ -311,10 +355,51 @@ async def audio_transcriptions(
 
 
 def _bad_request(message: str, *, param: Optional[str] = None) -> JSONResponse:
-    return JSONResponse(
-        status_code=400,
-        content=error_payload(message, code="bad_request", param=param),
+    return _error_response(400, message, code="bad_request", param=param)
+
+
+def _busy_response(operation: str) -> JSONResponse:
+    return _error_response(
+        503,
+        "server is busy running another local inference request",
+        code="server_busy",
+        param=operation,
     )
+
+
+def _error_response(
+    status_code: int,
+    message: str,
+    *,
+    code: Optional[str] = None,
+    param: Optional[str] = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content=error_payload(message, code=code, param=param),
+    )
+
+
+def _acquire_inference_lock(operation: str) -> Optional[float]:
+    timeout = settings.inference_lock_timeout_seconds
+    start_wait = time.monotonic()
+    acquired = inference_lock.acquire(timeout=timeout)
+    waited = time.monotonic() - start_wait
+
+    if not acquired:
+        logger.warning(
+            "%s timed out waiting for inference lock after %.2fs", operation, waited
+        )
+        return None
+
+    logger.info("%s acquired inference lock after %.2fs", operation, waited)
+    return time.monotonic()
+
+
+def _release_inference_lock(operation: str, lock_start: float) -> None:
+    elapsed = time.monotonic() - lock_start
+    inference_lock.release()
+    logger.info("%s released inference lock after %.2fs", operation, elapsed)
 
 
 def _sse(payload: dict[str, Any]) -> str:

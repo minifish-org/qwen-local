@@ -26,6 +26,7 @@ cached.
 - Embedding API model: `local-embedding`
 - Context: 8192 tokens
 - Default temperature: 0
+- Inference lock wait timeout: 60 seconds
 - Streaming chat: supported
 - Thinking: disabled in the Qwen chat template
 - Inference worker: single serialized worker for chat, embeddings, TTS, and ASR
@@ -204,7 +205,8 @@ Logs are written under `logs/`.
 The service intentionally runs local inference through one shared worker. Chat,
 embedding, TTS, and ASR requests are serialized so a 16 GB Mac does not try to
 run multiple MLX generations at the same time. Concurrent clients will wait
-their turn.
+their turn. If a request waits more than `INFERENCE_LOCK_TIMEOUT_SECONDS` for
+the worker, the server returns a `503` JSON error instead of queueing forever.
 
 Defaults favor predictable local behavior: temperature is `0`, Qwen thinking is
 disabled in the chat template, all local model capabilities share one process
