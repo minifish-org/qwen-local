@@ -8,9 +8,10 @@ from dataclasses import dataclass
 class Settings:
     llm_model: str = "mlx-community/Qwen3.5-4B-MLX-4bit"
     embedding_model: str = "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
-    tts_model: str = "kokoro"
-    tts_backend: str = "kokoro-mlx"
-    tts_default_voice: str = "af_heart"
+    tts_model: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit"
+    tts_backend: str = "mlx-audio"
+    tts_default_voice: str = "vivian"
+    tts_default_language: str = "auto"
     tts_response_format: str = "wav"
     tts_sample_rate: int = 24000
     asr_model: str = "mlx-community/whisper-small-mlx"
@@ -36,6 +37,9 @@ def get_settings() -> Settings:
         tts_model=os.getenv("TTS_MODEL", Settings.tts_model),
         tts_backend=os.getenv("TTS_BACKEND", Settings.tts_backend),
         tts_default_voice=os.getenv("TTS_DEFAULT_VOICE", Settings.tts_default_voice),
+        tts_default_language=os.getenv(
+            "TTS_DEFAULT_LANGUAGE", Settings.tts_default_language
+        ),
         tts_response_format=os.getenv(
             "TTS_RESPONSE_FORMAT", Settings.tts_response_format
         ),

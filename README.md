@@ -3,7 +3,7 @@
 OpenAI-compatible local Qwen service for a 16 GB Apple Silicon Mac.
 
 This project is a thin FastAPI adapter around local MLX models. It runs chat,
-embeddings, Kokoro text-to-speech, and Whisper speech-to-text in one process,
+embeddings, Qwen3 text-to-speech, and Whisper speech-to-text in one process,
 on one port, with no external API calls during inference after models are
 cached.
 
@@ -12,9 +12,11 @@ cached.
 - Runtime: MLX / mlx-lm
 - Chat model: `mlx-community/Qwen3.5-4B-MLX-4bit`
 - Embedding model: `mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`
-- TTS backend: `kokoro-mlx`
+- TTS backend: `mlx-audio`
+- TTS model: `mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit`
 - TTS model alias: `local-tts`
-- TTS default voice: `af_heart` (`"default"` maps to this voice)
+- TTS default voice: `vivian` (`"default"` maps to this voice)
+- TTS default language: `auto`
 - TTS format: `wav` at 24000 Hz
 - ASR backend: `mlx-whisper`
 - ASR model: `mlx-community/whisper-small-mlx`
@@ -39,7 +41,7 @@ cached.
 
 Required Python dependencies are listed in
 `local_openai_mlx_provider/requirements.txt`, including `mlx`, `mlx-lm`,
-`mlx-embeddings`, `kokoro-mlx`, `mlx-whisper`, and `python-multipart`.
+`mlx-embeddings`, `mlx-audio`, `mlx-whisper`, and `python-multipart`.
 
 ASR also requires `ffmpeg` on the host so Whisper can read common audio formats:
 
@@ -86,7 +88,7 @@ Test ASR with a local audio file:
 ./scripts/test-asr.sh
 ```
 
-Generate local Kokoro speech:
+Generate local Qwen3 speech:
 
 ```sh
 curl http://127.0.0.1:8000/v1/audio/speech \
@@ -94,7 +96,7 @@ curl http://127.0.0.1:8000/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{
     "model": "local-tts",
-    "input": "Hello, this is a local Kokoro text to speech test.",
+    "input": "你好，这是一个本地 Qwen3 语音合成测试。Hello from local text to speech.",
     "voice": "default",
     "response_format": "wav",
     "speed": 1.0
@@ -160,7 +162,7 @@ print(len(embed_resp.data[0].embedding))
 speech_resp = client.audio.speech.create(
     model="local-tts",
     voice="default",
-    input="Hello from local Kokoro text to speech.",
+    input="你好，这是一个本地 Qwen3 语音合成测试。",
     response_format="wav",
     speed=1.0,
 )
@@ -216,10 +218,12 @@ and one port, and launchd writes stdout/stderr logs under `logs/`.
 
 - v0.1 supports `wav` output only.
 - Audio speech generation is non-streaming.
-- Voice cloning and reference audio upload are not implemented.
+- Qwen3-TTS CustomVoice built-in voices are supported; reference audio upload
+  and voice cloning are not exposed by this API.
 - Long text chunking for audiobook-style generation is not implemented.
-- Kokoro English quality is the main target.
-- Chinese support should be treated as experimental unless tested locally.
+- The default voice is `vivian`; other known Qwen3 voices include `serena`,
+  `uncle_fu`, `ryan`, `aiden`, `ono_anna`, `sohee`, `eric`, and `dylan`.
+- Language is inferred as `zh` when CJK text is present, otherwise `en`.
 
 ## ASR Limitations
 

@@ -279,12 +279,15 @@ def audio_speech(req: AudioSpeechRequest):
         return _busy_response("tts")
 
     try:
-        audio = tts_runtime.speech(
-            text=text,
-            voice=voice,
-            response_format=response_format,
-            speed=float(speed),
-        )
+        try:
+            audio = tts_runtime.speech(
+                text=text,
+                voice=voice,
+                response_format=response_format,
+                speed=float(speed),
+            )
+        except ValueError as exc:
+            return _bad_request(str(exc), param="voice")
     finally:
         _release_inference_lock("tts", lock_start)
 
