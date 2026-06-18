@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from .config import Settings
+from .lifecycle import release_mlx_memory
 
 
 class LocalTTSProvider:
@@ -36,6 +37,14 @@ class LocalTTSProvider:
             raise RuntimeError(
                 f"unsupported TTS backend: {self._settings.tts_backend}"
             )
+
+    def is_loaded(self) -> bool:
+        return self._backend is not None
+
+    def unload(self) -> None:
+        with self._lock:
+            self._backend = None
+        release_mlx_memory()
 
     def speech(
         self,

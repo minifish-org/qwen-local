@@ -4,6 +4,7 @@ import threading
 from collections.abc import Iterator
 
 from .config import Settings
+from .lifecycle import release_mlx_memory
 from .openai_types import ChatMessage
 
 
@@ -30,6 +31,15 @@ class LLMRuntime:
                 ) from exc
 
             self._model, self._tokenizer = load(self._settings.llm_model)
+
+    def is_loaded(self) -> bool:
+        return self._model is not None and self._tokenizer is not None
+
+    def unload(self) -> None:
+        with self._lock:
+            self._model = None
+            self._tokenizer = None
+        release_mlx_memory()
 
     def complete(
         self,

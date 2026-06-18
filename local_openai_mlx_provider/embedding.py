@@ -4,6 +4,7 @@ import threading
 from typing import Iterable
 
 from .config import Settings
+from .lifecycle import release_mlx_memory
 
 
 class EmbeddingRuntime:
@@ -31,6 +32,16 @@ class EmbeddingRuntime:
 
             self._generate = generate
             self._model, self._processor = load(self._settings.embedding_model)
+
+    def is_loaded(self) -> bool:
+        return self._model is not None and self._processor is not None
+
+    def unload(self) -> None:
+        with self._lock:
+            self._model = None
+            self._processor = None
+            self._generate = None
+        release_mlx_memory()
 
     def embed(self, texts: Iterable[str]) -> list[list[float]]:
         self._load()

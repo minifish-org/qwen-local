@@ -24,6 +24,7 @@ class Settings:
     default_max_tokens: int = 512
     default_temperature: float = 0.0
     inference_lock_timeout_seconds: float = 60.0
+    model_keep_alive: str = "5m"
     api_llm_model: str = "local-llm"
     api_embedding_model: str = "local-embedding"
     api_tts_model: str = "local-tts"
@@ -69,6 +70,7 @@ def get_settings() -> Settings:
                 str(Settings.inference_lock_timeout_seconds),
             )
         ),
+        model_keep_alive=os.getenv("MODEL_KEEP_ALIVE", Settings.model_keep_alive),
         api_llm_model=os.getenv("API_LLM_MODEL", Settings.api_llm_model),
         api_embedding_model=os.getenv(
             "API_EMBEDDING_MODEL", Settings.api_embedding_model

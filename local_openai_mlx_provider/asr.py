@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 
 from .config import Settings
+from .lifecycle import release_mlx_memory
 
 
 class LocalASRProvider:
@@ -25,6 +26,14 @@ class LocalASRProvider:
                 )
 
             self._backend = MLXWhisperBackend(self._settings)
+
+    def is_loaded(self) -> bool:
+        return self._backend is not None
+
+    def unload(self) -> None:
+        with self._lock:
+            self._backend = None
+        release_mlx_memory()
 
     def transcribe(
         self,

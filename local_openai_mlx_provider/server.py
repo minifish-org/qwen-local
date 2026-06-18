@@ -17,6 +17,12 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from .asr import LocalASRProvider
 from .config import get_settings
 from .embedding import EmbeddingRuntime
+from .lifecycle import (
+    KeepAliveParseError,
+    KeepAliveSeconds,
+    RuntimeLifecycle,
+    parse_keep_alive,
+)
 from .llm import LLMRuntime
 from .openai_types import (
     AudioSpeechRequest,
@@ -36,6 +42,34 @@ embedding_runtime = EmbeddingRuntime(settings)
 tts_runtime = LocalTTSProvider(settings)
 asr_runtime = LocalASRProvider(settings)
 inference_lock = threading.Lock()
+llm_lifecycle = RuntimeLifecycle(
+    name="chat",
+    is_loaded=llm_runtime.is_loaded,
+    unload=llm_runtime.unload,
+    inference_lock=inference_lock,
+    logger=logger,
+)
+embedding_lifecycle = RuntimeLifecycle(
+    name="embedding",
+    is_loaded=embedding_runtime.is_loaded,
+    unload=embedding_runtime.unload,
+    inference_lock=inference_lock,
+    logger=logger,
+)
+tts_lifecycle = RuntimeLifecycle(
+    name="tts",
+    is_loaded=tts_runtime.is_loaded,
+    unload=tts_runtime.unload,
+    inference_lock=inference_lock,
+    logger=logger,
+)
+asr_lifecycle = RuntimeLifecycle(
+    name="asr",
+    is_loaded=asr_runtime.is_loaded,
+    unload=asr_runtime.unload,
+    inference_lock=inference_lock,
+    logger=logger,
+)
 
 
 @app.exception_handler(RequestValidationError)
@@ -71,6 +105,8 @@ def health() -> dict[str, Any]:
         "embedding_model": settings.api_embedding_model,
         "tts_model": settings.api_tts_model,
         "asr_model": settings.api_asr_model,
+        "model_keep_alive": settings.model_keep_alive,
+        "loaded_models": _loaded_model_state(),
     }
 
 
@@ -104,6 +140,10 @@ def chat_completions(req: ChatCompletionRequest):
     if not req.messages:
         return _bad_request("messages must not be empty", param="messages")
 
+    keep_alive = _request_keep_alive(req.keep_alive)
+    if isinstance(keep_alive, JSONResponse):
+        return keep_alive
+
     max_tokens = req.max_tokens or settings.default_max_tokens
     temperature = settings.default_temperature if req.temperature is None else req.temperature
 
@@ -112,12 +152,14 @@ def chat_completions(req: ChatCompletionRequest):
         if lock_start is None:
             return _busy_response("chat_stream")
 
+        llm_lifecycle.begin_request()
         return StreamingResponse(
             _chat_stream(
                 req,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 lock_start=lock_start,
+                keep_alive=keep_alive,
             ),
             media_type="text/event-stream",
         )
@@ -126,6 +168,7 @@ def chat_completions(req: ChatCompletionRequest):
     if lock_start is None:
         return _busy_response("chat")
 
+    llm_lifecycle.begin_request()
     try:
         content = llm_runtime.complete(
             req.messages,
@@ -133,6 +176,7 @@ def chat_completions(req: ChatCompletionRequest):
             max_tokens=max_tokens,
         )
     finally:
+        llm_lifecycle.finish_request(keep_alive)
         _release_inference_lock("chat", lock_start)
 
     payload: dict[str, Any] = {
@@ -165,6 +209,7 @@ def _chat_stream(
     temperature: float,
     max_tokens: int,
     lock_start: float,
+    keep_alive: KeepAliveSeconds,
 ) -> Iterator[str]:
     completion_id = f"chatcmpl-local-{uuid.uuid4().hex}"
     created = int(time.time())
@@ -212,6 +257,7 @@ def _chat_stream(
         logger.warning("chat_stream client disconnected before completion")
         raise
     finally:
+        llm_lifecycle.finish_request(keep_alive)
         _release_inference_lock("chat_stream", lock_start)
 
 
@@ -224,13 +270,19 @@ def embeddings(req: EmbeddingsRequest) -> JSONResponse:
     if not inputs:
         return _bad_request("input must not be empty", param="input")
 
+    keep_alive = _request_keep_alive(req.keep_alive)
+    if isinstance(keep_alive, JSONResponse):
+        return keep_alive
+
     lock_start = _acquire_inference_lock("embeddings")
     if lock_start is None:
         return _busy_response("embeddings")
 
+    embedding_lifecycle.begin_request()
     try:
         vectors = embedding_runtime.embed(inputs)
     finally:
+        embedding_lifecycle.finish_request(keep_alive)
         _release_inference_lock("embeddings", lock_start)
 
     payload = {
@@ -272,12 +324,17 @@ def audio_speech(req: AudioSpeechRequest):
     if not isinstance(speed, (int, float)) or speed <= 0:
         return _bad_request("speed must be a positive number", param="speed")
 
+    keep_alive = _request_keep_alive(req.keep_alive)
+    if isinstance(keep_alive, JSONResponse):
+        return keep_alive
+
     voice = req.voice or settings.tts_default_voice
 
     lock_start = _acquire_inference_lock("tts")
     if lock_start is None:
         return _busy_response("tts")
 
+    tts_lifecycle.begin_request()
     try:
         try:
             audio = tts_runtime.speech(
@@ -289,6 +346,7 @@ def audio_speech(req: AudioSpeechRequest):
         except ValueError as exc:
             return _bad_request(str(exc), param="voice")
     finally:
+        tts_lifecycle.finish_request(keep_alive)
         _release_inference_lock("tts", lock_start)
 
     return Response(content=audio, media_type="audio/wav")
@@ -302,6 +360,7 @@ def audio_transcriptions(
     prompt: Optional[str] = Form(None),
     response_format: Optional[str] = Form(None),
     temperature: Optional[float] = Form(None),
+    keep_alive: Optional[str] = Form(None),
 ):
     if model not in {settings.api_asr_model, settings.asr_model}:
         return _bad_request(f"unsupported ASR model: {model}", param="model")
@@ -319,6 +378,10 @@ def audio_transcriptions(
             "temperature must be a non-negative number", param="temperature"
         )
 
+    keep_alive_seconds = _request_keep_alive(keep_alive)
+    if isinstance(keep_alive_seconds, JSONResponse):
+        return keep_alive_seconds
+
     audio = file.file.read()
     if not audio:
         return _bad_request("file must be a non-empty audio file", param="file")
@@ -334,6 +397,7 @@ def audio_transcriptions(
         if lock_start is None:
             return _busy_response("asr")
 
+        asr_lifecycle.begin_request()
         try:
             text = asr_runtime.transcribe(
                 audio_path=temp_path,
@@ -343,6 +407,7 @@ def audio_transcriptions(
                 temperature=float(effective_temperature),
             )
         finally:
+            asr_lifecycle.finish_request(keep_alive_seconds)
             _release_inference_lock("asr", lock_start)
     finally:
         if temp_path:
@@ -355,6 +420,22 @@ def audio_transcriptions(
         return Response(content=text, media_type="text/plain")
 
     return JSONResponse({"text": text})
+
+
+def _request_keep_alive(value: Any) -> KeepAliveSeconds | JSONResponse:
+    try:
+        return parse_keep_alive(value, settings.model_keep_alive)
+    except KeepAliveParseError as exc:
+        return _bad_request(str(exc), param="keep_alive")
+
+
+def _loaded_model_state() -> dict[str, Any]:
+    return {
+        "chat": llm_lifecycle.state(),
+        "embedding": embedding_lifecycle.state(),
+        "tts": tts_lifecycle.state(),
+        "asr": asr_lifecycle.state(),
+    }
 
 
 def _bad_request(message: str, *, param: Optional[str] = None) -> JSONResponse:

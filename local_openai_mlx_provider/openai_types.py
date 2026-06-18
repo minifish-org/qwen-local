@@ -27,11 +27,13 @@ class ChatCompletionRequest(BaseModel):
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     stream: Optional[bool] = False
+    keep_alive: Optional[Union[str, int, float]] = None
 
 
 class EmbeddingsRequest(BaseModel):
     model: str
     input: Union[str, list[str]]
+    keep_alive: Optional[Union[str, int, float]] = None
 
 
 class AudioSpeechRequest(BaseModel):
@@ -40,6 +42,7 @@ class AudioSpeechRequest(BaseModel):
     voice: Optional[str] = None
     response_format: Optional[str] = None
     speed: Optional[float] = None
+    keep_alive: Optional[Union[str, int, float]] = None
 
 
 class ModelObject(BaseModel):

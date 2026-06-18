@@ -29,6 +29,7 @@ cached.
 - Context: 8192 tokens
 - Default temperature: 0
 - Inference lock wait timeout: 60 seconds
+- Model keep-alive: 5 minutes after the last request
 - Streaming chat: supported
 - Thinking: disabled in the Qwen chat template
 - Inference worker: single serialized worker for chat, embeddings, TTS, and ASR
@@ -69,6 +70,10 @@ Check that the server is responding:
 ```sh
 ./scripts/health.sh
 ```
+
+The health response includes `loaded_models`, which shows whether chat,
+embedding, TTS, or ASR models are currently loaded and when each one is
+scheduled to unload.
 
 Test embeddings:
 
@@ -181,6 +186,33 @@ print(transcription.text)
 
 Any OpenAI-compatible client should point at `http://127.0.0.1:8000/v1` and use
 `local-llm`, `local-embedding`, `local-tts`, or `local-asr` as the model name.
+
+## Model Lifecycle
+
+Models are loaded on first use and then kept in memory for `MODEL_KEEP_ALIVE`,
+which defaults to `5m`. When a model is idle past that duration, the service
+releases its Python reference and clears the MLX Metal cache. The server process
+continues running, so the next request loads the model again.
+
+`MODEL_KEEP_ALIVE` supports seconds or duration strings such as `0`, `30s`,
+`5m`, or `1h`. Any negative value, such as `-1`, keeps models loaded until the
+service restarts.
+
+Individual JSON requests can override the default with `keep_alive`:
+
+```sh
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "local-llm",
+    "messages": [{"role": "user", "content": "hello"}],
+    "max_tokens": 32,
+    "keep_alive": 0
+  }'
+```
+
+Use `keep_alive: 0` to unload after the response, or `keep_alive: -1` to keep
+that model loaded.
 
 ## Launchd
 
