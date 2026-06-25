@@ -45,6 +45,14 @@ class AudioSpeechRequest(BaseModel):
     keep_alive: Optional[Union[str, int, float]] = None
 
 
+class TranslationRequest(BaseModel):
+    model: str
+    source_language: str
+    target_language: str
+    text: str
+    keep_alive: Optional[Union[str, int, float]] = None
+
+
 class ModelObject(BaseModel):
     id: str
     object: str = "model"

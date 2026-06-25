@@ -30,8 +30,10 @@ from .openai_types import (
     EmbeddingsRequest,
     ModelList,
     ModelObject,
+    TranslationRequest,
     error_payload,
 )
+from .translation import NLLBTranslationRuntime, SUPPORTED_NLLB_LANGUAGE_CODES
 from .tts import LocalTTSProvider
 
 settings = get_settings()
@@ -41,6 +43,7 @@ llm_runtime = LLMRuntime(settings)
 embedding_runtime = EmbeddingRuntime(settings)
 tts_runtime = LocalTTSProvider(settings)
 asr_runtime = LocalASRProvider(settings)
+translation_runtime = NLLBTranslationRuntime(settings)
 inference_lock = threading.Lock()
 llm_lifecycle = RuntimeLifecycle(
     name="chat",
@@ -67,6 +70,13 @@ asr_lifecycle = RuntimeLifecycle(
     name="asr",
     is_loaded=asr_runtime.is_loaded,
     unload=asr_runtime.unload,
+    inference_lock=inference_lock,
+    logger=logger,
+)
+translation_lifecycle = RuntimeLifecycle(
+    name="translation",
+    is_loaded=translation_runtime.is_loaded,
+    unload=translation_runtime.unload,
     inference_lock=inference_lock,
     logger=logger,
 )
@@ -105,6 +115,7 @@ def health() -> dict[str, Any]:
         "embedding_model": settings.api_embedding_model,
         "tts_model": settings.api_tts_model,
         "asr_model": settings.api_asr_model,
+        "translation_model": settings.api_translation_model,
         "model_keep_alive": settings.model_keep_alive,
         "loaded_models": _loaded_model_state(),
     }
@@ -128,6 +139,7 @@ def models() -> ModelList:
             ModelObject(id=settings.api_embedding_model),
             ModelObject(id=settings.api_tts_model),
             ModelObject(id=settings.api_asr_model),
+            ModelObject(id=settings.api_translation_model),
         ]
     )
 
@@ -422,6 +434,61 @@ def audio_transcriptions(
     return JSONResponse({"text": text})
 
 
+@app.post("/v1/translations")
+def translations(req: TranslationRequest) -> JSONResponse:
+    if req.model not in {settings.api_translation_model, settings.translation_model}:
+        return _bad_request(
+            f"unsupported translation model: {req.model}", param="model"
+        )
+
+    text = req.text.strip() if isinstance(req.text, str) else ""
+    if not text:
+        return _bad_request("text must be a non-empty string", param="text")
+
+    language_error = _validate_translation_language(
+        req.source_language, field="source_language"
+    )
+    if language_error is not None:
+        return language_error
+
+    language_error = _validate_translation_language(
+        req.target_language, field="target_language"
+    )
+    if language_error is not None:
+        return language_error
+
+    keep_alive = _request_keep_alive(req.keep_alive)
+    if isinstance(keep_alive, JSONResponse):
+        return keep_alive
+
+    lock_start = _acquire_inference_lock("translation")
+    if lock_start is None:
+        return _busy_response("translation")
+
+    translation_lifecycle.begin_request()
+    try:
+        try:
+            translated_text = translation_runtime.translate(
+                text=text,
+                source_language=req.source_language,
+                target_language=req.target_language,
+            )
+        except ValueError as exc:
+            return _bad_request(str(exc))
+    finally:
+        translation_lifecycle.finish_request(keep_alive)
+        _release_inference_lock("translation", lock_start)
+
+    return JSONResponse(
+        {
+            "translated_text": translated_text,
+            "source_language": req.source_language,
+            "target_language": req.target_language,
+            "model": req.model,
+        }
+    )
+
+
 def _request_keep_alive(value: Any) -> KeepAliveSeconds | JSONResponse:
     try:
         return parse_keep_alive(value, settings.model_keep_alive)
@@ -435,7 +502,19 @@ def _loaded_model_state() -> dict[str, Any]:
         "embedding": embedding_lifecycle.state(),
         "tts": tts_lifecycle.state(),
         "asr": asr_lifecycle.state(),
+        "translation": translation_lifecycle.state(),
     }
+
+
+def _validate_translation_language(value: str, *, field: str) -> JSONResponse | None:
+    if value in SUPPORTED_NLLB_LANGUAGE_CODES:
+        return None
+
+    supported = ", ".join(sorted(SUPPORTED_NLLB_LANGUAGE_CODES))
+    return _bad_request(
+        f"unsupported {field}: {value}. Supported NLLB language codes: {supported}",
+        param=field,
+    )
 
 
 def _bad_request(message: str, *, param: Optional[str] = None) -> JSONResponse:
@@ -500,6 +579,7 @@ def _service_info() -> dict[str, Any]:
             "embedding": settings.api_embedding_model,
             "tts": settings.api_tts_model,
             "asr": settings.api_asr_model,
+            "translation": settings.api_translation_model,
         },
     }
 

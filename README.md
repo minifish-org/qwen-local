@@ -22,6 +22,10 @@ cached.
 - ASR model: `mlx-community/whisper-small-mlx`
 - ASR model alias: `local-asr`
 - ASR format: `json`
+- Translation backend: `ctranslate2`
+- Translation source model: `facebook/nllb-200-3.3B`
+- Translation model alias: `local-nllb-200-3.3b-ct2`
+- Translation format: JSON via `POST /v1/translations`
 - API URL: `http://127.0.0.1:8000/v1`
 - Tailscale URL: `http://<mac-tailscale-ip>:8000/v1`
 - Chat API model: `local-llm`
@@ -32,7 +36,7 @@ cached.
 - Model keep-alive: 5 minutes after the last request
 - Streaming chat: supported
 - Thinking: disabled in the Qwen chat template
-- Inference worker: single serialized worker for chat, embeddings, TTS, and ASR
+- Inference worker: single serialized worker for chat, embeddings, TTS, ASR, and translation
 
 ## Setup
 
@@ -42,7 +46,8 @@ cached.
 
 Required Python dependencies are listed in
 `local_openai_mlx_provider/requirements.txt`, including `mlx`, `mlx-lm`,
-`mlx-embeddings`, `mlx-audio`, `mlx-whisper`, and `python-multipart`.
+`mlx-embeddings`, `mlx-audio`, `mlx-whisper`, `python-multipart`,
+`ctranslate2`, `transformers`, and `sentencepiece`.
 
 ASR also requires `ffmpeg` on the host so Whisper can read common audio formats:
 
@@ -50,8 +55,15 @@ ASR also requires `ffmpeg` on the host so Whisper can read common audio formats:
 brew install ffmpeg
 ```
 
-The first chat, embedding, TTS, or ASR request may download model files from
-Hugging Face. After that, inference runs locally from the model cache.
+The first chat, embedding, TTS, ASR, or tokenizer request may download model
+files from Hugging Face. After that, inference runs locally from the model
+cache.
+
+Translation uses a local CTranslate2 NLLB directory. Set
+`TRANSLATION_MODEL_PATH` to an int8 conversion of `facebook/nllb-200-3.3B`.
+The 3.3B model can be slow or memory-heavy on a 16 GB MacBook Air; the supported
+fallback is an int8 CTranslate2 build or a distilled 1.3B NLLB model with the
+same NLLB language codes.
 
 ## Run
 
@@ -119,6 +131,24 @@ curl http://127.0.0.1:8000/v1/audio/transcriptions \
   -F response_format=json
 ```
 
+Translate local text:
+
+```sh
+curl http://127.0.0.1:8000/v1/translations \
+  -H "Authorization: Bearer local" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "local-nllb-200-3.3b-ct2",
+    "source_language": "jpn_Jpan",
+    "target_language": "zho_Hans",
+    "text": "こんにちは。今日は良い天気です。"
+  }'
+```
+
+The translation endpoint supports these common NLLB language codes:
+`eng_Latn`, `jpn_Jpan`, `kor_Hang`, `spa_Latn`, `fra_Latn`, `deu_Latn`,
+`ita_Latn`, `por_Latn`, `zho_Hans`, and `zho_Hant`.
+
 Run an application-style OpenAI compatibility check:
 
 ```sh
@@ -185,7 +215,8 @@ print(transcription.text)
 ```
 
 Any OpenAI-compatible client should point at `http://127.0.0.1:8000/v1` and use
-`local-llm`, `local-embedding`, `local-tts`, or `local-asr` as the model name.
+`local-llm`, `local-embedding`, `local-tts`, `local-asr`, or
+`local-nllb-200-3.3b-ct2` as the model name.
 
 ## Model Lifecycle
 
