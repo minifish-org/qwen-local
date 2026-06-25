@@ -14,7 +14,7 @@ class Settings:
     tts_default_language: str = "auto"
     tts_response_format: str = "wav"
     tts_sample_rate: int = 24000
-    asr_model: str = "mlx-community/whisper-small-mlx"
+    asr_model: str = "mlx-community/whisper-large-v3-turbo"
     asr_backend: str = "mlx-whisper"
     asr_default_language: str = ""
     asr_response_format: str = "json"

@@ -19,7 +19,7 @@ cached.
 - TTS default language: `auto`
 - TTS format: `wav` at 24000 Hz
 - ASR backend: `mlx-whisper`
-- ASR model: `mlx-community/whisper-small-mlx`
+- ASR model: `mlx-community/whisper-large-v3-turbo`
 - ASR model alias: `local-asr`
 - ASR format: `json`
 - Translation backend: `ctranslate2`
