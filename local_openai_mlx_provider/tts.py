@@ -16,22 +16,32 @@ class LocalTTSProvider:
     def __init__(self, settings: Settings):
         self._settings = settings
         self._backend: KokoroMLXBackend | MLXAudioQwenTTSBackend | None = None
+        self._backend_model_id: str | None = None
         self._lock = threading.Lock()
 
-    def _load(self) -> None:
-        if self._backend is not None:
+    def _load(self, *, model_id: str, model_kind: str) -> None:
+        if self._backend is not None and self._backend_model_id == model_id:
             return
 
         with self._lock:
-            if self._backend is not None:
+            if self._backend is not None and self._backend_model_id == model_id:
                 return
 
+            if self._backend is not None:
+                self._backend = None
+                self._backend_model_id = None
+                release_mlx_memory()
+
             if self._settings.tts_backend == "kokoro-mlx":
-                self._backend = KokoroMLXBackend(self._settings)
+                self._backend = KokoroMLXBackend(self._settings, model_id=model_id)
+                self._backend_model_id = model_id
                 return
 
             if self._settings.tts_backend == "mlx-audio":
-                self._backend = MLXAudioQwenTTSBackend(self._settings)
+                self._backend = MLXAudioQwenTTSBackend(
+                    self._settings, model_id=model_id, model_kind=model_kind
+                )
+                self._backend_model_id = model_id
                 return
 
             raise RuntimeError(
@@ -44,27 +54,33 @@ class LocalTTSProvider:
     def unload(self) -> None:
         with self._lock:
             self._backend = None
+            self._backend_model_id = None
         release_mlx_memory()
 
     def speech(
         self,
+        *,
+        model_id: str,
+        model_kind: str,
         text: str,
         voice: str = "default",
+        instruct: str | None = None,
         response_format: str = "wav",
         speed: float = 1.0,
     ) -> bytes:
-        self._load()
+        self._load(model_id=model_id, model_kind=model_kind)
         assert self._backend is not None
         return self._backend.speech(
             text=text,
             voice=voice,
+            instruct=instruct,
             response_format=response_format,
             speed=speed,
         )
 
 
 class KokoroMLXBackend:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, model_id: str):
         try:
             from kokoro_mlx import KokoroTTS
         except ImportError as exc:
@@ -72,11 +88,11 @@ class KokoroMLXBackend:
                 "kokoro-mlx is not installed. Install requirements.txt first."
             ) from exc
 
-        model_id = None if settings.tts_model == "kokoro" else settings.tts_model
-        if model_id is None:
+        effective_model_id = None if model_id == "kokoro" else model_id
+        if effective_model_id is None:
             self._tts = KokoroTTS.from_pretrained()
         else:
-            self._tts = KokoroTTS.from_pretrained(model_id)
+            self._tts = KokoroTTS.from_pretrained(effective_model_id)
 
         self._sample_rate = settings.tts_sample_rate
         self._default_voice = settings.tts_default_voice
@@ -86,6 +102,7 @@ class KokoroMLXBackend:
         *,
         text: str,
         voice: str,
+        instruct: str | None,
         response_format: str,
         speed: float,
     ) -> bytes:
@@ -118,7 +135,7 @@ class MLXAudioQwenTTSBackend:
         "dylan",
     }
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, model_id: str, model_kind: str):
         try:
             from mlx_audio.tts.generate import generate_audio
             from mlx_audio.tts.utils import load_model
@@ -128,7 +145,8 @@ class MLXAudioQwenTTSBackend:
             ) from exc
 
         self._generate_audio = generate_audio
-        self._model = load_model(settings.tts_model)
+        self._model = load_model(model_id)
+        self._model_kind = model_kind
         self._default_voice = settings.tts_default_voice
         self._default_language = settings.tts_default_language
 
@@ -137,6 +155,7 @@ class MLXAudioQwenTTSBackend:
         *,
         text: str,
         voice: str,
+        instruct: str | None,
         response_format: str,
         speed: float,
     ) -> bytes:
@@ -144,7 +163,11 @@ class MLXAudioQwenTTSBackend:
             raise ValueError(f"unsupported response_format: {response_format}")
 
         qwen_voice = self._default_voice if voice == "default" else voice
-        if qwen_voice not in self._SUPPORTED_VOICES:
+        if self._model_kind == "voice_design":
+            if not instruct:
+                raise ValueError("instruct is required for Qwen3-TTS VoiceDesign")
+            qwen_voice = self._default_voice
+        elif qwen_voice not in self._SUPPORTED_VOICES:
             supported = ", ".join(sorted(self._SUPPORTED_VOICES))
             raise ValueError(
                 f"unsupported Qwen3-TTS voice: {qwen_voice}. Supported voices: {supported}"
@@ -158,6 +181,7 @@ class MLXAudioQwenTTSBackend:
                     text=text,
                     model=self._model,
                     voice=qwen_voice,
+                    instruct=instruct,
                     speed=speed,
                     lang_code=lang_code,
                     output_path=temp_dir,

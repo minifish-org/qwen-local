@@ -13,8 +13,9 @@ cached.
 - Chat model: `mlx-community/Qwen3.5-4B-MLX-4bit`
 - Embedding model: `mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`
 - TTS backend: `mlx-audio`
-- TTS model: `mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit`
-- TTS model alias: `local-tts`
+- TTS CustomVoice model: `mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit`
+- TTS VoiceDesign model: `mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-4bit`
+- TTS model aliases: `local-tts`, `local-tts-voice-design`
 - TTS default voice: `vivian` (`"default"` maps to this voice)
 - TTS default language: `auto`
 - TTS format: `wav` at 24000 Hz
@@ -121,6 +122,22 @@ curl http://127.0.0.1:8000/v1/audio/speech \
   --output speech.wav
 ```
 
+Generate local Qwen3 speech with a designed voice:
+
+```sh
+curl http://127.0.0.1:8000/v1/audio/speech \
+  -H "Authorization: Bearer local" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "local-tts-voice-design",
+    "input": "你好，这是一个更自然的本地语音合成测试。",
+    "instruct": "自然口语、温暖、不像播音腔，有正常的停顿。",
+    "response_format": "wav",
+    "speed": 1.0
+  }' \
+  --output speech-voice-design.wav
+```
+
 Transcribe local audio:
 
 ```sh
@@ -215,8 +232,8 @@ print(transcription.text)
 ```
 
 Any OpenAI-compatible client should point at `http://127.0.0.1:8000/v1` and use
-`local-llm`, `local-embedding`, `local-tts`, `local-asr`, or
-`local-nllb-200-3.3b-ct2` as the model name.
+`local-llm`, `local-embedding`, `local-tts`, `local-tts-voice-design`,
+`local-asr`, or `local-nllb-200-3.3b-ct2` as the model name.
 
 ## Model Lifecycle
 
@@ -281,8 +298,10 @@ and one port, and launchd writes stdout/stderr logs under `logs/`.
 
 - v0.1 supports `wav` output only.
 - Audio speech generation is non-streaming.
-- Qwen3-TTS CustomVoice built-in voices are supported; reference audio upload
-  and voice cloning are not exposed by this API.
+- Qwen3-TTS CustomVoice built-in voices are supported through `voice`.
+- Qwen3-TTS VoiceDesign is supported through `model=local-tts-voice-design`
+  and a required `instruct` voice description.
+- Reference audio upload and voice cloning are not exposed by this API.
 - Long text chunking for audiobook-style generation is not implemented.
 - The default voice is `vivian`; other known Qwen3 voices include `serena`,
   `uncle_fu`, `ryan`, `aiden`, `ono_anna`, `sohee`, `eric`, and `dylan`.

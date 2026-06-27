@@ -11,9 +11,9 @@ It exposes:
 - `POST /v1/audio/transcriptions`
 
 Chat, embedding, TTS, and ASR inference share one serialized worker to keep
-memory usage predictable on 16 GB Macs. TTS and ASR use the same process and
-worker when the service is launched through the repository launchd setup.
-Loaded models are kept warm for `MODEL_KEEP_ALIVE` and then unloaded when idle.
+memory usage predictable on 16 GB Macs. TTS supports both `local-tts` and
+`local-tts-voice-design`; only one TTS model is kept loaded at a time. Loaded
+models are kept warm for `MODEL_KEEP_ALIVE` and then unloaded when idle.
 
 It intentionally does not implement `/v1/responses`, `/v1/rerank`, RAG, vector
 storage, tool calling, agents, streaming audio, OCR, image generation, or VLM

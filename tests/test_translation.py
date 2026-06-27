@@ -20,6 +20,12 @@ def test_models_includes_translation_model(client):
         ("kor_Hang", "eng_Latn", "안녕하세요", "Hello."),
         ("spa_Latn", "zho_Hans", "Buenos dias", "早上好。"),
         ("fra_Latn", "zho_Hans", "Bonjour", "你好。"),
+        ("rus_Cyrl", "eng_Latn", "Здравствуйте", "Hello."),
+        ("arb_Arab", "eng_Latn", "مرحبا", "Hello."),
+        ("hin_Deva", "eng_Latn", "नमस्ते", "Hello."),
+        ("tha_Thai", "eng_Latn", "สวัสดี", "Hello."),
+        ("vie_Latn", "eng_Latn", "Xin chào", "Hello."),
+        ("ind_Latn", "eng_Latn", "Halo", "Hello."),
     ],
 )
 def test_translations_for_common_language_pairs(
@@ -54,6 +60,37 @@ def test_translations_for_common_language_pairs(
     assert calls == [(text, source_language, target_language)]
 
 
+def test_translations_falls_back_to_llm_when_nllb_model_path_is_missing(
+    client, monkeypatch
+):
+    def fake_translate(*, text, source_language, target_language):
+        raise RuntimeError("TRANSLATION_MODEL_PATH must point to a local CTranslate2 NLLB model directory.")
+
+    llm_calls = []
+
+    def fake_llm_translate(*, text, source_language, target_language):
+        llm_calls.append((text, source_language, target_language))
+        return "你好。"
+
+    monkeypatch.setattr(server.translation_runtime, "translate", fake_translate)
+    monkeypatch.setattr(server, "_translate_with_llm", fake_llm_translate)
+
+    response = client.post(
+        "/v1/translations",
+        json={
+            "model": server.settings.api_translation_model,
+            "source_language": "eng_Latn",
+            "target_language": "zho_Hans",
+            "text": "Hello.",
+            "keep_alive": 0,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["translated_text"] == "你好。"
+    assert llm_calls == [("Hello.", "eng_Latn", "zho_Hans")]
+
+
 def test_translations_rejects_unsupported_model(client):
     response = client.post(
         "/v1/translations",
@@ -70,6 +107,26 @@ def test_translations_rejects_unsupported_model(client):
     assert payload["error"]["code"] == "bad_request"
     assert payload["error"]["param"] == "model"
     assert "unsupported translation model" in payload["error"]["message"]
+
+
+def test_translations_accepts_tailgate_local_translation_alias(client, monkeypatch):
+    def fake_translate(*, text, source_language, target_language):
+        return "你好"
+
+    monkeypatch.setattr(server.translation_runtime, "translate", fake_translate)
+
+    response = client.post(
+        "/v1/translations",
+        json={
+            "model": "local-translation",
+            "source_language": "eng_Latn",
+            "target_language": "zho_Hans",
+            "text": "hello",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["model"] == "local-translation"
 
 
 def test_translations_rejects_unsupported_language(client):

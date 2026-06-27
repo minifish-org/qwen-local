@@ -7,13 +7,19 @@ from .lifecycle import release_mlx_memory
 
 SUPPORTED_NLLB_LANGUAGE_CODES = {
     "eng_Latn",
+    "arb_Arab",
     "jpn_Jpan",
+    "hin_Deva",
+    "ind_Latn",
     "kor_Hang",
+    "rus_Cyrl",
     "spa_Latn",
     "fra_Latn",
     "deu_Latn",
     "ita_Latn",
     "por_Latn",
+    "tha_Thai",
+    "vie_Latn",
     "zho_Hans",
     "zho_Hant",
 }

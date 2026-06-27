@@ -40,6 +40,7 @@ class AudioSpeechRequest(BaseModel):
     model: str
     input: str
     voice: Optional[str] = None
+    instruct: Optional[str] = None
     response_format: Optional[str] = None
     speed: Optional[float] = None
     keep_alive: Optional[Union[str, int, float]] = None

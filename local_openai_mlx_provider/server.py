@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
+import subprocess
 import threading
 import time
 import uuid
+import wave
+from array import array
 from collections.abc import Iterator
 from tempfile import NamedTemporaryFile
 from typing import Any, Optional
@@ -26,6 +30,7 @@ from .lifecycle import (
 from .llm import LLMRuntime
 from .openai_types import (
     AudioSpeechRequest,
+    ChatMessage,
     ChatCompletionRequest,
     EmbeddingsRequest,
     ModelList,
@@ -80,6 +85,9 @@ translation_lifecycle = RuntimeLifecycle(
     inference_lock=inference_lock,
     logger=logger,
 )
+_TRANSLATION_MODEL_ALIASES = {"local-translation"}
+_TTS_MODEL_KIND_CUSTOM = "custom_voice"
+_TTS_MODEL_KIND_VOICE_DESIGN = "voice_design"
 
 
 @app.exception_handler(RequestValidationError)
@@ -114,6 +122,7 @@ def health() -> dict[str, Any]:
         "chat_model": settings.api_llm_model,
         "embedding_model": settings.api_embedding_model,
         "tts_model": settings.api_tts_model,
+        "tts_voice_design_model": settings.api_tts_voice_design_model,
         "asr_model": settings.api_asr_model,
         "translation_model": settings.api_translation_model,
         "model_keep_alive": settings.model_keep_alive,
@@ -138,6 +147,7 @@ def models() -> ModelList:
             ModelObject(id=settings.api_llm_model),
             ModelObject(id=settings.api_embedding_model),
             ModelObject(id=settings.api_tts_model),
+            ModelObject(id=settings.api_tts_voice_design_model),
             ModelObject(id=settings.api_asr_model),
             ModelObject(id=settings.api_translation_model),
         ]
@@ -318,8 +328,10 @@ def embeddings(req: EmbeddingsRequest) -> JSONResponse:
 
 @app.post("/v1/audio/speech")
 def audio_speech(req: AudioSpeechRequest):
-    if req.model not in {settings.api_tts_model, settings.tts_model}:
+    resolved_tts_model = _resolve_tts_model(req.model)
+    if resolved_tts_model is None:
         return _bad_request(f"unsupported TTS model: {req.model}", param="model")
+    model_id, model_kind = resolved_tts_model
 
     text = req.input.strip() if isinstance(req.input, str) else ""
     if not text:
@@ -341,6 +353,14 @@ def audio_speech(req: AudioSpeechRequest):
         return keep_alive
 
     voice = req.voice or settings.tts_default_voice
+    instruct = req.instruct.strip() if req.instruct is not None else None
+    if instruct == "":
+        instruct = None
+
+    if model_kind == _TTS_MODEL_KIND_VOICE_DESIGN and instruct is None:
+        return _bad_request(
+            "instruct is required for Qwen3-TTS VoiceDesign", param="instruct"
+        )
 
     lock_start = _acquire_inference_lock("tts")
     if lock_start is None:
@@ -350,13 +370,17 @@ def audio_speech(req: AudioSpeechRequest):
     try:
         try:
             audio = tts_runtime.speech(
+                model_id=model_id,
+                model_kind=model_kind,
                 text=text,
                 voice=voice,
+                instruct=instruct,
                 response_format=response_format,
                 speed=float(speed),
             )
         except ValueError as exc:
-            return _bad_request(str(exc), param="voice")
+            param = "instruct" if model_kind == _TTS_MODEL_KIND_VOICE_DESIGN else "voice"
+            return _bad_request(str(exc), param=param)
     finally:
         tts_lifecycle.finish_request(keep_alive)
         _release_inference_lock("tts", lock_start)
@@ -400,10 +424,21 @@ def audio_transcriptions(
 
     suffix = _upload_suffix(file.filename)
     temp_path = ""
+    asr_audio_path = ""
     try:
         with NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             temp_file.write(audio)
             temp_path = temp_file.name
+
+        try:
+            asr_audio_path = _transcode_asr_audio_to_wav(temp_path)
+        except ValueError as exc:
+            return _bad_request(str(exc), param="file")
+
+        try:
+            _validate_asr_audio_has_signal(asr_audio_path)
+        except ValueError as exc:
+            return _bad_request(str(exc), param="file")
 
         lock_start = _acquire_inference_lock("asr")
         if lock_start is None:
@@ -412,7 +447,7 @@ def audio_transcriptions(
         asr_lifecycle.begin_request()
         try:
             text = asr_runtime.transcribe(
-                audio_path=temp_path,
+                audio_path=asr_audio_path,
                 language=language,
                 prompt=prompt,
                 response_format=effective_format,
@@ -422,9 +457,11 @@ def audio_transcriptions(
             asr_lifecycle.finish_request(keep_alive_seconds)
             _release_inference_lock("asr", lock_start)
     finally:
-        if temp_path:
+        for path in {temp_path, asr_audio_path}:
+            if not path:
+                continue
             try:
-                os.unlink(temp_path)
+                os.unlink(path)
             except FileNotFoundError:
                 pass
 
@@ -436,7 +473,11 @@ def audio_transcriptions(
 
 @app.post("/v1/translations")
 def translations(req: TranslationRequest) -> JSONResponse:
-    if req.model not in {settings.api_translation_model, settings.translation_model}:
+    if req.model not in {
+        settings.api_translation_model,
+        settings.translation_model,
+        *_TRANSLATION_MODEL_ALIASES,
+    }:
         return _bad_request(
             f"unsupported translation model: {req.model}", param="model"
         )
@@ -469,6 +510,14 @@ def translations(req: TranslationRequest) -> JSONResponse:
     try:
         try:
             translated_text = translation_runtime.translate(
+                text=text,
+                source_language=req.source_language,
+                target_language=req.target_language,
+            )
+        except RuntimeError as exc:
+            if not _is_missing_translation_model_path(exc):
+                raise
+            translated_text = _translate_with_llm(
                 text=text,
                 source_language=req.source_language,
                 target_language=req.target_language,
@@ -514,6 +563,58 @@ def _validate_translation_language(value: str, *, field: str) -> JSONResponse | 
     return _bad_request(
         f"unsupported {field}: {value}. Supported NLLB language codes: {supported}",
         param=field,
+    )
+
+
+_TRANSLATION_LANGUAGE_NAMES = {
+    "arb_Arab": "Arabic",
+    "eng_Latn": "English",
+    "hin_Deva": "Hindi",
+    "ind_Latn": "Indonesian",
+    "jpn_Jpan": "Japanese",
+    "kor_Hang": "Korean",
+    "rus_Cyrl": "Russian",
+    "spa_Latn": "Spanish",
+    "fra_Latn": "French",
+    "deu_Latn": "German",
+    "ita_Latn": "Italian",
+    "por_Latn": "Portuguese",
+    "tha_Thai": "Thai",
+    "vie_Latn": "Vietnamese",
+    "zho_Hans": "Simplified Chinese",
+    "zho_Hant": "Traditional Chinese",
+}
+
+
+def _is_missing_translation_model_path(exc: RuntimeError) -> bool:
+    return "TRANSLATION_MODEL_PATH must point to a local CTranslate2 NLLB model directory" in str(
+        exc
+    )
+
+
+def _translate_with_llm(
+    *, text: str, source_language: str, target_language: str
+) -> str:
+    source = _TRANSLATION_LANGUAGE_NAMES.get(source_language, source_language)
+    target = _TRANSLATION_LANGUAGE_NAMES.get(target_language, target_language)
+    messages = [
+        ChatMessage(
+            role="system",
+            content=(
+                "You are a precise translation engine. Translate the user's text "
+                "from the source language to the target language. Return only the "
+                "translation, without explanations or surrounding quotes."
+            ),
+        ),
+        ChatMessage(
+            role="user",
+            content=f"Source language: {source}\nTarget language: {target}\nText:\n{text}",
+        ),
+    ]
+    return llm_runtime.complete(
+        messages,
+        temperature=0.0,
+        max_tokens=settings.translation_max_decoding_length,
     )
 
 
@@ -578,10 +679,24 @@ def _service_info() -> dict[str, Any]:
             "chat": settings.api_llm_model,
             "embedding": settings.api_embedding_model,
             "tts": settings.api_tts_model,
+            "tts_voice_design": settings.api_tts_voice_design_model,
             "asr": settings.api_asr_model,
             "translation": settings.api_translation_model,
         },
     }
+
+
+def _resolve_tts_model(model: str) -> tuple[str, str] | None:
+    if model in {settings.api_tts_model, settings.tts_model}:
+        return settings.tts_model, _TTS_MODEL_KIND_CUSTOM
+
+    if model in {
+        settings.api_tts_voice_design_model,
+        settings.tts_voice_design_model,
+    }:
+        return settings.tts_voice_design_model, _TTS_MODEL_KIND_VOICE_DESIGN
+
+    return None
 
 
 def _upload_suffix(filename: Optional[str]) -> str:
@@ -590,6 +705,97 @@ def _upload_suffix(filename: Optional[str]) -> str:
 
     _, suffix = os.path.splitext(filename)
     return suffix or ".audio"
+
+
+def _transcode_asr_audio_to_wav(audio_path: str) -> str:
+    with NamedTemporaryFile(delete=False, suffix=".wav") as output_file:
+        output_path = output_file.name
+
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                audio_path,
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-f",
+                "wav",
+                output_path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        try:
+            os.unlink(output_path)
+        except FileNotFoundError:
+            pass
+        raise ValueError("ffmpeg is required to decode uploaded audio for ASR") from exc
+    except subprocess.CalledProcessError as exc:
+        try:
+            os.unlink(output_path)
+        except FileNotFoundError:
+            pass
+        detail = (exc.stderr or exc.stdout or "").strip()
+        if detail:
+            detail = detail.splitlines()[-1]
+            raise ValueError(
+                f"failed to decode uploaded audio with ffmpeg: {detail}"
+            ) from exc
+        raise ValueError("failed to decode uploaded audio with ffmpeg") from exc
+
+    return output_path
+
+
+def _validate_asr_audio_has_signal(audio_path: str) -> None:
+    try:
+        with wave.open(audio_path, "rb") as wav:
+            sample_width = wav.getsampwidth()
+            frame_count = wav.getnframes()
+            frame_rate = wav.getframerate()
+            channel_count = wav.getnchannels()
+
+            if sample_width != 2:
+                raise ValueError("uploaded audio could not be normalized for ASR")
+            if frame_rate <= 0 or frame_count <= 0:
+                raise ValueError("audio is silent or too quiet for transcription")
+            if frame_count / frame_rate < 0.25:
+                raise ValueError("audio is too short for transcription")
+
+            peak = 0
+            sample_count = 0
+            square_sum = 0.0
+            while True:
+                chunk = wav.readframes(8192)
+                if not chunk:
+                    break
+                samples = array("h")
+                samples.frombytes(chunk)
+                for index, sample in enumerate(samples):
+                    if channel_count > 1 and index % channel_count != 0:
+                        continue
+                    absolute = abs(sample)
+                    peak = max(peak, absolute)
+                    square_sum += float(sample) * float(sample)
+                    sample_count += 1
+    except wave.Error as exc:
+        raise ValueError("uploaded audio could not be decoded after normalization") from exc
+
+    if sample_count <= 0:
+        raise ValueError("audio is silent or too quiet for transcription")
+
+    rms = math.sqrt(square_sum / sample_count)
+    if peak <= 1 or rms < 1:
+        raise ValueError("audio is silent or too quiet for transcription")
 
 
 def main() -> None:
