@@ -88,6 +88,18 @@ translation_lifecycle = RuntimeLifecycle(
 _TRANSLATION_MODEL_ALIASES = {"local-translation"}
 _TTS_MODEL_KIND_CUSTOM = "custom_voice"
 _TTS_MODEL_KIND_VOICE_DESIGN = "voice_design"
+_TTS_RESPONSE_FORMATS = ("wav", "mp3", "opus", "aac")
+_TTS_MEDIA_TYPES = {
+    "wav": "audio/wav",
+    "mp3": "audio/mpeg",
+    "opus": "audio/ogg; codecs=opus",
+    "aac": "audio/aac",
+}
+_TTS_TRANSCODE_ARGS = {
+    "mp3": ["-codec:a", "libmp3lame", "-b:a", "128k", "-f", "mp3"],
+    "opus": ["-codec:a", "libopus", "-b:a", "48k", "-f", "opus"],
+    "aac": ["-codec:a", "aac", "-b:a", "128k", "-f", "adts"],
+}
 
 
 @app.exception_handler(RequestValidationError)
@@ -337,10 +349,11 @@ def audio_speech(req: AudioSpeechRequest):
     if not text:
         return _bad_request("input must be a non-empty string", param="input")
 
-    response_format = req.response_format or settings.tts_response_format
-    if response_format != "wav":
+    response_format = (req.response_format or settings.tts_response_format).lower()
+    if response_format not in _TTS_RESPONSE_FORMATS:
+        supported = ", ".join(_TTS_RESPONSE_FORMATS)
         return _bad_request(
-            f"unsupported response_format: {response_format}. Supported formats: wav",
+            f"unsupported response_format: {response_format}. Supported formats: {supported}",
             param="response_format",
         )
 
@@ -375,7 +388,7 @@ def audio_speech(req: AudioSpeechRequest):
                 text=text,
                 voice=voice,
                 instruct=instruct,
-                response_format=response_format,
+                response_format="wav",
                 speed=float(speed),
             )
         except ValueError as exc:
@@ -385,7 +398,13 @@ def audio_speech(req: AudioSpeechRequest):
         tts_lifecycle.finish_request(keep_alive)
         _release_inference_lock("tts", lock_start)
 
-    return Response(content=audio, media_type="audio/wav")
+    if response_format != "wav":
+        try:
+            audio = _transcode_tts_audio(audio, response_format)
+        except ValueError as exc:
+            return _bad_request(str(exc), param="response_format")
+
+    return Response(content=audio, media_type=_TTS_MEDIA_TYPES[response_format])
 
 
 @app.post("/v1/audio/transcriptions")
@@ -697,6 +716,63 @@ def _resolve_tts_model(model: str) -> tuple[str, str] | None:
         return settings.tts_voice_design_model, _TTS_MODEL_KIND_VOICE_DESIGN
 
     return None
+
+
+def _transcode_tts_audio(audio: bytes, response_format: str) -> bytes:
+    transcode_args = _TTS_TRANSCODE_ARGS.get(response_format)
+    if transcode_args is None:
+        raise ValueError(f"unsupported response_format: {response_format}")
+
+    input_path = ""
+    output_path = ""
+    try:
+        with NamedTemporaryFile(delete=False, suffix=".wav") as input_file:
+            input_file.write(audio)
+            input_path = input_file.name
+
+        with NamedTemporaryFile(delete=False, suffix=f".{response_format}") as output_file:
+            output_path = output_file.name
+
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                input_path,
+                "-vn",
+                *transcode_args,
+                output_path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        with open(output_path, "rb") as output_file:
+            return output_file.read()
+    except FileNotFoundError as exc:
+        raise ValueError(
+            f"ffmpeg is required to encode TTS response_format: {response_format}"
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        if detail:
+            detail = detail.splitlines()[-1]
+            raise ValueError(
+                f"failed to encode TTS audio with ffmpeg: {detail}"
+            ) from exc
+        raise ValueError("failed to encode TTS audio with ffmpeg") from exc
+    finally:
+        for path in {input_path, output_path}:
+            if not path:
+                continue
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
 
 
 def _upload_suffix(filename: Optional[str]) -> str:

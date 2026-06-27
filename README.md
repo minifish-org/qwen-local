@@ -18,7 +18,7 @@ cached.
 - TTS model aliases: `local-tts`, `local-tts-voice-design`
 - TTS default voice: `vivian` (`"default"` maps to this voice)
 - TTS default language: `auto`
-- TTS format: `wav` at 24000 Hz
+- TTS formats: `wav`, `mp3`, `opus`, `aac`
 - ASR backend: `mlx-whisper`
 - ASR model: `mlx-community/whisper-large-v3-turbo`
 - ASR model alias: `local-asr`
@@ -120,6 +120,22 @@ curl http://127.0.0.1:8000/v1/audio/speech \
     "speed": 1.0
   }' \
   --output speech.wav
+```
+
+Generate a browser-friendly MP3:
+
+```sh
+curl http://127.0.0.1:8000/v1/audio/speech \
+  -H "Authorization: Bearer local" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "local-tts",
+    "input": "Hello from local text to speech.",
+    "voice": "default",
+    "response_format": "mp3",
+    "speed": 1.0
+  }' \
+  --output speech.mp3
 ```
 
 Generate local Qwen3 speech with a designed voice:
@@ -296,7 +312,8 @@ and one port, and launchd writes stdout/stderr logs under `logs/`.
 
 ## TTS Limitations
 
-- v0.1 supports `wav` output only.
+- TTS supports `wav`, `mp3`, `opus`, and `aac` output.
+- Network-oriented TTS formats are encoded from the generated WAV with `ffmpeg`.
 - Audio speech generation is non-streaming.
 - Qwen3-TTS CustomVoice built-in voices are supported through `voice`.
 - Qwen3-TTS VoiceDesign is supported through `model=local-tts-voice-design`
