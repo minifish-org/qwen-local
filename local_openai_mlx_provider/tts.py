@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import logging
 import os
 import threading
 import wave
@@ -9,7 +10,13 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from .config import Settings
-from .lifecycle import release_mlx_memory
+from .lifecycle import (
+    mlx_memory_snapshot,
+    release_mlx_memory,
+    reset_mlx_peak_memory,
+)
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class LocalTTSProvider:
@@ -175,28 +182,35 @@ class MLXAudioQwenTTSBackend:
 
         lang_code = _language_code(text, self._default_language)
 
-        with TemporaryDirectory(prefix="qwen-local-tts-") as temp_dir:
-            with contextlib.redirect_stdout(io.StringIO()):
-                self._generate_audio(
-                    text=text,
-                    model=self._model,
-                    voice=qwen_voice,
-                    instruct=instruct,
-                    speed=speed,
-                    lang_code=lang_code,
-                    output_path=temp_dir,
-                    file_prefix="speech",
-                    audio_format=response_format,
-                    join_audio=True,
-                    verbose=False,
-                    play=False,
-            )
-            audio_path = os.path.join(temp_dir, f"speech.{response_format}")
-            if not os.path.exists(audio_path):
-                raise RuntimeError("mlx-audio did not produce an output audio file.")
+        reset_mlx_peak_memory()
+        try:
+            with TemporaryDirectory(prefix="qwen-local-tts-") as temp_dir:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self._generate_audio(
+                        text=text,
+                        model=self._model,
+                        voice=qwen_voice,
+                        instruct=instruct,
+                        speed=speed,
+                        lang_code=lang_code,
+                        output_path=temp_dir,
+                        file_prefix="speech",
+                        audio_format=response_format,
+                        join_audio=True,
+                        verbose=False,
+                        play=False,
+                    )
+                audio_path = os.path.join(temp_dir, f"speech.{response_format}")
+                if not os.path.exists(audio_path):
+                    raise RuntimeError(
+                        "mlx-audio did not produce an output audio file."
+                    )
 
-            with open(audio_path, "rb") as audio_file:
-                return audio_file.read()
+                with open(audio_path, "rb") as audio_file:
+                    return audio_file.read()
+        finally:
+            release_mlx_memory()
+            _log_mlx_memory_after_tts_cleanup()
 
 
 def _language_code(text: str, default_language: str) -> str:
@@ -207,6 +221,23 @@ def _language_code(text: str, default_language: str) -> str:
         return "zh"
 
     return "en"
+
+
+def _log_mlx_memory_after_tts_cleanup() -> None:
+    snapshot = mlx_memory_snapshot()
+    if snapshot is None:
+        return
+
+    logger.info(
+        "tts mlx memory after request cleanup: active=%.2fMB cache=%.2fMB peak=%.2fMB",
+        _bytes_to_mb(snapshot["active_bytes"]),
+        _bytes_to_mb(snapshot["cache_bytes"]),
+        _bytes_to_mb(snapshot["peak_bytes"]),
+    )
+
+
+def _bytes_to_mb(value: int) -> float:
+    return value / 1024 / 1024
 
 
 def _wav_bytes(audio: Any, sample_rate: int) -> bytes:

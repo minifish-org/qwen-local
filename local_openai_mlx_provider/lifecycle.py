@@ -179,3 +179,44 @@ def release_mlx_memory() -> None:
     clear_cache = getattr(metal, "clear_cache", None)
     if callable(clear_cache):
         clear_cache()
+
+
+def mlx_memory_snapshot() -> dict[str, int] | None:
+    try:
+        import mlx.core as mx
+    except ImportError:
+        return None
+
+    active_memory = _call_mlx_memory_getter(mx, "get_active_memory")
+    cache_memory = _call_mlx_memory_getter(mx, "get_cache_memory")
+    peak_memory = _call_mlx_memory_getter(mx, "get_peak_memory")
+    if active_memory is None or cache_memory is None or peak_memory is None:
+        return None
+
+    return {
+        "active_bytes": active_memory,
+        "cache_bytes": cache_memory,
+        "peak_bytes": peak_memory,
+    }
+
+
+def reset_mlx_peak_memory() -> None:
+    try:
+        import mlx.core as mx
+    except ImportError:
+        return
+
+    reset_peak_memory = getattr(mx, "reset_peak_memory", None)
+    if callable(reset_peak_memory):
+        reset_peak_memory()
+
+
+def _call_mlx_memory_getter(mx: Any, name: str) -> int | None:
+    getter = getattr(mx, name, None)
+    if not callable(getter):
+        return None
+
+    try:
+        return int(getter())
+    except Exception:
+        return None

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from local_openai_mlx_provider import server
 from local_openai_mlx_provider import tts as tts_module
 
@@ -288,3 +290,88 @@ def test_tts_provider_switches_model_before_loading_next_backend(monkeypatch):
         == f"{server.settings.tts_voice_design_model}:voice_design".encode()
     )
     assert releases == ["released"]
+
+
+def test_mlx_audio_tts_cleans_and_logs_memory_after_each_request(monkeypatch):
+    events = []
+    log_calls = []
+
+    class FakeLogger:
+        def info(self, message, *args):
+            log_calls.append((message, args))
+
+    def fake_generate_audio(**kwargs):
+        events.append("generate")
+        output_path = Path(kwargs["output_path"])
+        audio_path = output_path.joinpath(
+            f"{kwargs['file_prefix']}.{kwargs['audio_format']}"
+        )
+        audio_path.write_bytes(b"RIFF....WAVEfmt ")
+
+    backend = tts_module.MLXAudioQwenTTSBackend.__new__(
+        tts_module.MLXAudioQwenTTSBackend
+    )
+    backend._generate_audio = fake_generate_audio
+    backend._model = object()
+    backend._model_kind = "voice_design"
+    backend._default_voice = "vivian"
+    backend._default_language = "auto"
+
+    monkeypatch.setattr(tts_module, "logger", FakeLogger(), raising=False)
+    monkeypatch.setattr(
+        tts_module,
+        "reset_mlx_peak_memory",
+        lambda: events.append("reset_peak"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        tts_module,
+        "release_mlx_memory",
+        lambda: events.append("cleanup"),
+    )
+    monkeypatch.setattr(
+        tts_module,
+        "mlx_memory_snapshot",
+        lambda: {
+            "active_bytes": 1024 * 1024,
+            "cache_bytes": 2 * 1024 * 1024,
+            "peak_bytes": 3 * 1024 * 1024,
+        },
+        raising=False,
+    )
+
+    first_audio = backend.speech(
+        text="hello",
+        voice="default",
+        instruct="natural voice",
+        response_format="wav",
+        speed=1.0,
+    )
+    second_audio = backend.speech(
+        text="again",
+        voice="default",
+        instruct="natural voice",
+        response_format="wav",
+        speed=1.0,
+    )
+
+    assert first_audio == b"RIFF....WAVEfmt "
+    assert second_audio == b"RIFF....WAVEfmt "
+    assert events == [
+        "reset_peak",
+        "generate",
+        "cleanup",
+        "reset_peak",
+        "generate",
+        "cleanup",
+    ]
+    assert log_calls == [
+        (
+            "tts mlx memory after request cleanup: active=%.2fMB cache=%.2fMB peak=%.2fMB",
+            (1.0, 2.0, 3.0),
+        ),
+        (
+            "tts mlx memory after request cleanup: active=%.2fMB cache=%.2fMB peak=%.2fMB",
+            (1.0, 2.0, 3.0),
+        ),
+    ]
