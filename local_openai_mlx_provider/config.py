@@ -8,7 +8,7 @@ from dataclasses import dataclass
 class Settings:
     llm_model: str = "mlx-community/Qwen3.5-4B-MLX-4bit"
     embedding_model: str = "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
-    tts_model: str = "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit"
+    tts_model: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit"
     tts_voice_design_model: str = (
         "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-4bit"
     )

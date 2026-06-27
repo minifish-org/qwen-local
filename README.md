@@ -13,7 +13,7 @@ cached.
 - Chat model: `mlx-community/Qwen3.5-4B-MLX-4bit`
 - Embedding model: `mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`
 - TTS backend: `mlx-audio`
-- TTS CustomVoice model: `mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit`
+- TTS CustomVoice model: `mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit`
 - TTS VoiceDesign model: `mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-4bit`
 - TTS model aliases: `local-tts`, `local-tts-voice-design`
 - TTS default voice: `vivian` (`"default"` maps to this voice)
