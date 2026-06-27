@@ -93,6 +93,36 @@ def test_audio_speech_voice_design_routes_with_instruct(client, monkeypatch):
     assert response.content == audio
 
 
+def test_audio_speech_runs_tts_runtime_on_inference_worker(client, monkeypatch):
+    audio = b"RIFF....WAVEfmt "
+    events = []
+
+    def fake_run(fn):
+        events.append("worker")
+        return fn()
+
+    def fake_speech(**_):
+        events.append("speech")
+        return audio
+
+    monkeypatch.setattr(server.inference_worker, "run", fake_run)
+    monkeypatch.setattr(server.tts_runtime, "speech", fake_speech)
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={
+            "model": server.settings.api_tts_model,
+            "input": "hello",
+            "response_format": "wav",
+            "keep_alive": 0,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.content == audio
+    assert events == ["worker", "speech"]
+
+
 def test_audio_speech_transcodes_network_formats(client, monkeypatch):
     wav_audio = b"RIFF....WAVEfmt "
     encoded_audio = b"encoded audio"

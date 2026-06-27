@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from .asr import LocalASRProvider
 from .config import get_settings
 from .embedding import EmbeddingRuntime
+from .inference_worker import InferenceWorker
 from .lifecycle import (
     KeepAliveParseError,
     KeepAliveSeconds,
@@ -49,39 +50,40 @@ embedding_runtime = EmbeddingRuntime(settings)
 tts_runtime = LocalTTSProvider(settings)
 asr_runtime = LocalASRProvider(settings)
 translation_runtime = NLLBTranslationRuntime(settings)
+inference_worker = InferenceWorker()
 inference_lock = threading.Lock()
 llm_lifecycle = RuntimeLifecycle(
     name="chat",
     is_loaded=llm_runtime.is_loaded,
-    unload=llm_runtime.unload,
+    unload=lambda: inference_worker.run(llm_runtime.unload),
     inference_lock=inference_lock,
     logger=logger,
 )
 embedding_lifecycle = RuntimeLifecycle(
     name="embedding",
     is_loaded=embedding_runtime.is_loaded,
-    unload=embedding_runtime.unload,
+    unload=lambda: inference_worker.run(embedding_runtime.unload),
     inference_lock=inference_lock,
     logger=logger,
 )
 tts_lifecycle = RuntimeLifecycle(
     name="tts",
     is_loaded=tts_runtime.is_loaded,
-    unload=tts_runtime.unload,
+    unload=lambda: inference_worker.run(tts_runtime.unload),
     inference_lock=inference_lock,
     logger=logger,
 )
 asr_lifecycle = RuntimeLifecycle(
     name="asr",
     is_loaded=asr_runtime.is_loaded,
-    unload=asr_runtime.unload,
+    unload=lambda: inference_worker.run(asr_runtime.unload),
     inference_lock=inference_lock,
     logger=logger,
 )
 translation_lifecycle = RuntimeLifecycle(
     name="translation",
     is_loaded=translation_runtime.is_loaded,
-    unload=translation_runtime.unload,
+    unload=lambda: inference_worker.run(translation_runtime.unload),
     inference_lock=inference_lock,
     logger=logger,
 )
@@ -206,10 +208,12 @@ def chat_completions(req: ChatCompletionRequest):
 
     llm_lifecycle.begin_request()
     try:
-        content = llm_runtime.complete(
-            req.messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
+        content = inference_worker.run(
+            lambda: llm_runtime.complete(
+                req.messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
         )
     finally:
         llm_lifecycle.finish_request(keep_alive)
@@ -260,10 +264,12 @@ def _chat_stream(
     try:
         yield _sse(first_chunk)
 
-        for text in llm_runtime.stream(
-            req.messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
+        for text in inference_worker.iterate(
+            lambda: llm_runtime.stream(
+                req.messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
         ):
             payload = {
                 "id": completion_id,
@@ -316,7 +322,7 @@ def embeddings(req: EmbeddingsRequest) -> JSONResponse:
 
     embedding_lifecycle.begin_request()
     try:
-        vectors = embedding_runtime.embed(inputs)
+        vectors = inference_worker.run(lambda: embedding_runtime.embed(inputs))
     finally:
         embedding_lifecycle.finish_request(keep_alive)
         _release_inference_lock("embeddings", lock_start)
@@ -384,14 +390,16 @@ def audio_speech(req: AudioSpeechRequest):
     tts_lifecycle.begin_request()
     try:
         try:
-            audio = tts_runtime.speech(
-                model_id=model_id,
-                model_kind=model_kind,
-                text=text,
-                voice=voice,
-                instruct=instruct,
-                response_format="wav",
-                speed=float(speed),
+            audio = inference_worker.run(
+                lambda: tts_runtime.speech(
+                    model_id=model_id,
+                    model_kind=model_kind,
+                    text=text,
+                    voice=voice,
+                    instruct=instruct,
+                    response_format="wav",
+                    speed=float(speed),
+                )
             )
         except ValueError as exc:
             param = "instruct" if model_kind == _TTS_MODEL_KIND_VOICE_DESIGN else "voice"
@@ -467,12 +475,14 @@ def audio_transcriptions(
 
         asr_lifecycle.begin_request()
         try:
-            text = asr_runtime.transcribe(
-                audio_path=asr_audio_path,
-                language=language,
-                prompt=prompt,
-                response_format=effective_format,
-                temperature=float(effective_temperature),
+            text = inference_worker.run(
+                lambda: asr_runtime.transcribe(
+                    audio_path=asr_audio_path,
+                    language=language,
+                    prompt=prompt,
+                    response_format=effective_format,
+                    temperature=float(effective_temperature),
+                )
             )
         finally:
             asr_lifecycle.finish_request(keep_alive_seconds)
@@ -530,10 +540,12 @@ def translations(req: TranslationRequest) -> JSONResponse:
     translation_lifecycle.begin_request()
     try:
         try:
-            translated_text = translation_runtime.translate(
-                text=text,
-                source_language=req.source_language,
-                target_language=req.target_language,
+            translated_text = inference_worker.run(
+                lambda: translation_runtime.translate(
+                    text=text,
+                    source_language=req.source_language,
+                    target_language=req.target_language,
+                )
             )
         except RuntimeError as exc:
             if not _is_missing_translation_model_path(exc):
@@ -632,10 +644,12 @@ def _translate_with_llm(
             content=f"Source language: {source}\nTarget language: {target}\nText:\n{text}",
         ),
     ]
-    return llm_runtime.complete(
-        messages,
-        temperature=0.0,
-        max_tokens=settings.translation_max_decoding_length,
+    return inference_worker.run(
+        lambda: llm_runtime.complete(
+            messages,
+            temperature=0.0,
+            max_tokens=settings.translation_max_decoding_length,
+        )
     )
 
 
