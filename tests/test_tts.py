@@ -135,6 +135,7 @@ def test_audio_speech_sets_media_types_for_supported_formats(client, monkeypatch
 
     for response_format, media_type in {
         "opus": "audio/ogg; codecs=opus",
+        "webm": "audio/webm; codecs=opus",
         "aac": "audio/aac",
     }.items():
         response = client.post(
@@ -163,7 +164,7 @@ def test_audio_speech_rejects_unsupported_response_format(client, monkeypatch):
         json={
             "model": server.settings.api_tts_model,
             "input": "hello",
-            "response_format": "webm",
+            "response_format": "flac",
             "keep_alive": 0,
         },
     )
@@ -171,7 +172,7 @@ def test_audio_speech_rejects_unsupported_response_format(client, monkeypatch):
     assert response.status_code == 400
     payload = response.json()
     assert payload["error"]["param"] == "response_format"
-    assert "Supported formats: wav, mp3, opus, aac" in payload["error"]["message"]
+    assert "Supported formats: wav, mp3, opus, webm, aac" in payload["error"]["message"]
 
 
 def test_audio_speech_reports_transcode_failures(client, monkeypatch):

@@ -88,16 +88,18 @@ translation_lifecycle = RuntimeLifecycle(
 _TRANSLATION_MODEL_ALIASES = {"local-translation"}
 _TTS_MODEL_KIND_CUSTOM = "custom_voice"
 _TTS_MODEL_KIND_VOICE_DESIGN = "voice_design"
-_TTS_RESPONSE_FORMATS = ("wav", "mp3", "opus", "aac")
+_TTS_RESPONSE_FORMATS = ("wav", "mp3", "opus", "webm", "aac")
 _TTS_MEDIA_TYPES = {
     "wav": "audio/wav",
     "mp3": "audio/mpeg",
     "opus": "audio/ogg; codecs=opus",
+    "webm": "audio/webm; codecs=opus",
     "aac": "audio/aac",
 }
 _TTS_TRANSCODE_ARGS = {
     "mp3": ["-codec:a", "libmp3lame", "-b:a", "128k", "-f", "mp3"],
     "opus": ["-codec:a", "libopus", "-b:a", "48k", "-f", "opus"],
+    "webm": ["-codec:a", "libopus", "-b:a", "48k", "-f", "webm"],
     "aac": ["-codec:a", "aac", "-b:a", "128k", "-f", "adts"],
 }
 
