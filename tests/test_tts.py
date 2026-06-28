@@ -378,6 +378,73 @@ def test_tts_provider_switches_backend_by_model_kind(monkeypatch):
     assert releases == ["released"]
 
 
+def test_kokoro_mlx_tts_cleans_and_logs_memory_after_each_request(monkeypatch):
+    events = []
+    log_calls = []
+
+    class FakeLogger:
+        def info(self, message, *args):
+            log_calls.append((message, args))
+
+    class FakeResult:
+        audio = [0.0, 0.0, 0.0]
+        sample_rate = 24000
+
+    class FakeTTS:
+        def generate(self, text, *, voice, speed, sample_rate):
+            events.append(("generate", text, voice, speed, sample_rate))
+            return FakeResult()
+
+    backend = tts_module.KokoroMLXBackend.__new__(tts_module.KokoroMLXBackend)
+    backend._tts = FakeTTS()
+    backend._sample_rate = 24000
+    backend._default_voice = "zf_xiaoxiao"
+
+    monkeypatch.setattr(tts_module, "logger", FakeLogger(), raising=False)
+    monkeypatch.setattr(
+        tts_module,
+        "reset_mlx_peak_memory",
+        lambda: events.append(("reset_peak",)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        tts_module,
+        "release_mlx_memory",
+        lambda: events.append(("cleanup",)),
+    )
+    monkeypatch.setattr(
+        tts_module,
+        "mlx_memory_snapshot",
+        lambda: {
+            "active_bytes": 1024 * 1024,
+            "cache_bytes": 2 * 1024 * 1024,
+            "peak_bytes": 3 * 1024 * 1024,
+        },
+        raising=False,
+    )
+
+    audio = backend.speech(
+        text="hello",
+        voice="default",
+        instruct=None,
+        response_format="wav",
+        speed=1.0,
+    )
+
+    assert audio.startswith(b"RIFF")
+    assert events == [
+        ("reset_peak",),
+        ("generate", "hello", "zf_xiaoxiao", 1.0, 24000),
+        ("cleanup",),
+    ]
+    assert log_calls == [
+        (
+            "tts mlx memory after request cleanup: active=%.2fMB cache=%.2fMB peak=%.2fMB",
+            (1.0, 2.0, 3.0),
+        )
+    ]
+
+
 def test_mlx_audio_tts_cleans_and_logs_memory_after_each_request(monkeypatch):
     events = []
     log_calls = []

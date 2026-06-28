@@ -124,20 +124,25 @@ class KokoroMLXBackend:
         response_format: str,
         speed: float,
     ) -> bytes:
-        kokoro_voice = self._default_voice if voice == "default" else voice
-        result = self._tts.generate(
-            text,
-            voice=kokoro_voice,
-            speed=speed,
-            sample_rate=self._sample_rate,
-        )
-        sample_rate = int(getattr(result, "sample_rate", self._sample_rate))
-        audio = getattr(result, "audio", result)
+        reset_mlx_peak_memory()
+        try:
+            kokoro_voice = self._default_voice if voice == "default" else voice
+            result = self._tts.generate(
+                text,
+                voice=kokoro_voice,
+                speed=speed,
+                sample_rate=self._sample_rate,
+            )
+            sample_rate = int(getattr(result, "sample_rate", self._sample_rate))
+            audio = getattr(result, "audio", result)
 
-        if response_format == "wav":
-            return _wav_bytes(audio, sample_rate)
+            if response_format == "wav":
+                return _wav_bytes(audio, sample_rate)
 
-        raise ValueError(f"unsupported response_format: {response_format}")
+            raise ValueError(f"unsupported response_format: {response_format}")
+        finally:
+            release_mlx_memory()
+            _log_mlx_memory_after_tts_cleanup()
 
 
 class MLXAudioQwenTTSBackend:
