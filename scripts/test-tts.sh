@@ -13,7 +13,7 @@ curl -fsS "${BASE_URL}/v1/audio/speech" \
   -H "Content-Type: application/json" \
   -d "{
     \"model\": \"${API_TTS_MODEL}\",
-    \"input\": \"你好，这是一个本地 Qwen3 语音合成测试。Hello from local text to speech.\",
+    \"input\": \"你好，这是一个本地 Kokoro 语音合成测试。Hello from local text to speech.\",
     \"voice\": \"default\",
     \"response_format\": \"${RESPONSE_FORMAT}\",
     \"speed\": 1.0

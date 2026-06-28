@@ -24,36 +24,46 @@ class LocalTTSProvider:
         self._settings = settings
         self._backend: KokoroMLXBackend | MLXAudioQwenTTSBackend | None = None
         self._backend_model_id: str | None = None
+        self._backend_model_kind: str | None = None
         self._lock = threading.Lock()
 
     def _load(self, *, model_id: str, model_kind: str) -> None:
-        if self._backend is not None and self._backend_model_id == model_id:
+        if (
+            self._backend is not None
+            and self._backend_model_id == model_id
+            and self._backend_model_kind == model_kind
+        ):
             return
 
         with self._lock:
-            if self._backend is not None and self._backend_model_id == model_id:
+            if (
+                self._backend is not None
+                and self._backend_model_id == model_id
+                and self._backend_model_kind == model_kind
+            ):
                 return
 
             if self._backend is not None:
                 self._backend = None
                 self._backend_model_id = None
+                self._backend_model_kind = None
                 release_mlx_memory()
 
-            if self._settings.tts_backend == "kokoro-mlx":
+            if model_kind == "kokoro":
                 self._backend = KokoroMLXBackend(self._settings, model_id=model_id)
                 self._backend_model_id = model_id
+                self._backend_model_kind = model_kind
                 return
 
-            if self._settings.tts_backend == "mlx-audio":
+            if model_kind in {"custom_voice", "voice_design"}:
                 self._backend = MLXAudioQwenTTSBackend(
                     self._settings, model_id=model_id, model_kind=model_kind
                 )
                 self._backend_model_id = model_id
+                self._backend_model_kind = model_kind
                 return
 
-            raise RuntimeError(
-                f"unsupported TTS backend: {self._settings.tts_backend}"
-            )
+            raise RuntimeError(f"unsupported TTS model kind: {model_kind}")
 
     def is_loaded(self) -> bool:
         return self._backend is not None
@@ -62,6 +72,7 @@ class LocalTTSProvider:
         with self._lock:
             self._backend = None
             self._backend_model_id = None
+            self._backend_model_kind = None
         release_mlx_memory()
 
     def speech(

@@ -88,6 +88,7 @@ translation_lifecycle = RuntimeLifecycle(
     logger=logger,
 )
 _TRANSLATION_MODEL_ALIASES = {"local-translation"}
+_TTS_MODEL_KIND_KOKORO = "kokoro"
 _TTS_MODEL_KIND_CUSTOM = "custom_voice"
 _TTS_MODEL_KIND_VOICE_DESIGN = "voice_design"
 _TTS_RESPONSE_FORMATS = ("wav", "mp3", "opus", "webm", "aac")
@@ -138,6 +139,7 @@ def health() -> dict[str, Any]:
         "chat_model": settings.api_llm_model,
         "embedding_model": settings.api_embedding_model,
         "tts_model": settings.api_tts_model,
+        "tts_quality_model": settings.api_tts_quality_model,
         "tts_voice_design_model": settings.api_tts_voice_design_model,
         "asr_model": settings.api_asr_model,
         "translation_model": settings.api_translation_model,
@@ -163,6 +165,7 @@ def models() -> ModelList:
             ModelObject(id=settings.api_llm_model),
             ModelObject(id=settings.api_embedding_model),
             ModelObject(id=settings.api_tts_model),
+            ModelObject(id=settings.api_tts_quality_model),
             ModelObject(id=settings.api_tts_voice_design_model),
             ModelObject(id=settings.api_asr_model),
             ModelObject(id=settings.api_translation_model),
@@ -714,6 +717,7 @@ def _service_info() -> dict[str, Any]:
             "chat": settings.api_llm_model,
             "embedding": settings.api_embedding_model,
             "tts": settings.api_tts_model,
+            "tts_quality": settings.api_tts_quality_model,
             "tts_voice_design": settings.api_tts_voice_design_model,
             "asr": settings.api_asr_model,
             "translation": settings.api_translation_model,
@@ -723,7 +727,10 @@ def _service_info() -> dict[str, Any]:
 
 def _resolve_tts_model(model: str) -> tuple[str, str] | None:
     if model in {settings.api_tts_model, settings.tts_model}:
-        return settings.tts_model, _TTS_MODEL_KIND_CUSTOM
+        return settings.tts_model, _TTS_MODEL_KIND_KOKORO
+
+    if model in {settings.api_tts_quality_model, settings.tts_quality_model}:
+        return settings.tts_quality_model, _TTS_MODEL_KIND_CUSTOM
 
     if model in {
         settings.api_tts_voice_design_model,

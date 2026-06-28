@@ -12,11 +12,12 @@ cached.
 - Runtime: MLX / mlx-lm
 - Chat model: `mlx-community/Qwen3.5-4B-MLX-4bit`
 - Embedding model: `mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`
-- TTS backend: `mlx-audio`
-- TTS CustomVoice model: `mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit`
+- TTS default backend: `kokoro-mlx`
+- TTS default model: `mlx-community/Kokoro-82M-bf16`
+- TTS quality model: `mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit`
 - TTS VoiceDesign model: `mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-4bit`
-- TTS model aliases: `local-tts`, `local-tts-voice-design`
-- TTS default voice: `vivian` (`"default"` maps to this voice)
+- TTS model aliases: `local-tts`, `local-tts-quality`, `local-tts-voice-design`
+- TTS default voice: `zf_xiaoxiao` (`"default"` maps to this Kokoro Mandarin voice)
 - TTS default language: `auto`
 - TTS formats: `wav`, `mp3`, `opus`, `webm`, `aac`
 - ASR backend: `mlx-whisper`
@@ -47,8 +48,8 @@ cached.
 
 Required Python dependencies are listed in
 `local_openai_mlx_provider/requirements.txt`, including `mlx`, `mlx-lm`,
-`mlx-embeddings`, `mlx-audio`, `mlx-whisper`, `python-multipart`,
-`ctranslate2`, `transformers`, and `sentencepiece`.
+`mlx-embeddings`, `mlx-audio`, `mlx-whisper`, `kokoro-mlx`,
+`python-multipart`, `ctranslate2`, `transformers`, and `sentencepiece`.
 
 ASR also requires `ffmpeg` on the host so Whisper can read common audio formats:
 
@@ -106,7 +107,7 @@ Test ASR with a local audio file:
 ./scripts/test-asr.sh
 ```
 
-Generate local Qwen3 speech:
+Generate local Kokoro speech:
 
 ```sh
 curl http://127.0.0.1:8000/v1/audio/speech \
@@ -114,7 +115,7 @@ curl http://127.0.0.1:8000/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{
     "model": "local-tts",
-    "input": "你好，这是一个本地 Qwen3 语音合成测试。Hello from local text to speech.",
+    "input": "你好，这是一个本地 Kokoro 语音合成测试。Hello from local text to speech.",
     "voice": "default",
     "response_format": "wav",
     "speed": 1.0
@@ -152,6 +153,22 @@ curl http://127.0.0.1:8000/v1/audio/speech \
     "speed": 1.0
   }' \
   --output speech.webm
+```
+
+Generate higher-quality local Qwen3 CustomVoice speech:
+
+```sh
+curl http://127.0.0.1:8000/v1/audio/speech \
+  -H "Authorization: Bearer local" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "local-tts-quality",
+    "input": "你好，这是一个更高质量的本地 Qwen3 语音合成测试。",
+    "voice": "vivian",
+    "response_format": "wav",
+    "speed": 1.0
+  }' \
+  --output speech-quality.wav
 ```
 
 Generate local Qwen3 speech with a designed voice:
@@ -246,7 +263,7 @@ print(len(embed_resp.data[0].embedding))
 speech_resp = client.audio.speech.create(
     model="local-tts",
     voice="default",
-    input="你好，这是一个本地 Qwen3 语音合成测试。",
+    input="你好，这是一个本地 Kokoro 语音合成测试。",
     response_format="wav",
     speed=1.0,
 )
@@ -264,8 +281,9 @@ print(transcription.text)
 ```
 
 Any OpenAI-compatible client should point at `http://127.0.0.1:8000/v1` and use
-`local-llm`, `local-embedding`, `local-tts`, `local-tts-voice-design`,
-`local-asr`, or `local-nllb-200-3.3b-ct2` as the model name.
+`local-llm`, `local-embedding`, `local-tts`, `local-tts-quality`,
+`local-tts-voice-design`, `local-asr`, or `local-nllb-200-3.3b-ct2` as the
+model name.
 
 ## Model Lifecycle
 
@@ -331,13 +349,17 @@ and one port, and launchd writes stdout/stderr logs under `logs/`.
 - TTS supports `wav`, `mp3`, `opus`, `webm`, and `aac` output.
 - Network-oriented TTS formats are encoded from the generated WAV with `ffmpeg`.
 - Audio speech generation is non-streaming.
-- Qwen3-TTS CustomVoice built-in voices are supported through `voice`.
+- `local-tts` uses Kokoro-82M. Kokoro Mandarin voices include `zf_xiaoxiao`,
+  `zf_xiaobei`, `zf_xiaoni`, `zf_xiaoyi`, `zm_yunjian`, `zm_yunxi`,
+  `zm_yunxia`, and `zm_yunyang`.
+- Qwen3-TTS CustomVoice is available through `model=local-tts-quality`; its
+  built-in voices are supported through `voice`.
 - Qwen3-TTS VoiceDesign is supported through `model=local-tts-voice-design`
   and a required `instruct` voice description.
 - Reference audio upload and voice cloning are not exposed by this API.
 - Long text chunking for audiobook-style generation is not implemented.
-- The default voice is `vivian`; other known Qwen3 voices include `serena`,
-  `uncle_fu`, `ryan`, `aiden`, `ono_anna`, `sohee`, `eric`, and `dylan`.
+- Qwen3 voices include `vivian`, `serena`, `uncle_fu`, `ryan`, `aiden`,
+  `ono_anna`, `sohee`, `eric`, and `dylan`.
 - Language is inferred as `zh` when CJK text is present, otherwise `en`.
 
 ## ASR Limitations

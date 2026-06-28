@@ -8,12 +8,15 @@ from dataclasses import dataclass
 class Settings:
     llm_model: str = "mlx-community/Qwen3.5-4B-MLX-4bit"
     embedding_model: str = "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
-    tts_model: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit"
+    tts_model: str = "mlx-community/Kokoro-82M-bf16"
+    tts_quality_model: str = (
+        "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit"
+    )
     tts_voice_design_model: str = (
         "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-4bit"
     )
-    tts_backend: str = "mlx-audio"
-    tts_default_voice: str = "vivian"
+    tts_backend: str = "kokoro-mlx"
+    tts_default_voice: str = "zf_xiaoxiao"
     tts_default_language: str = "auto"
     tts_response_format: str = "wav"
     tts_sample_rate: int = 24000
@@ -38,6 +41,7 @@ class Settings:
     api_llm_model: str = "local-llm"
     api_embedding_model: str = "local-embedding"
     api_tts_model: str = "local-tts"
+    api_tts_quality_model: str = "local-tts-quality"
     api_tts_voice_design_model: str = "local-tts-voice-design"
     api_asr_model: str = "local-asr"
     api_translation_model: str = "local-nllb-200-3.3b-ct2"
@@ -48,6 +52,9 @@ def get_settings() -> Settings:
         llm_model=os.getenv("LLM_MODEL", Settings.llm_model),
         embedding_model=os.getenv("EMBEDDING_MODEL", Settings.embedding_model),
         tts_model=os.getenv("TTS_MODEL", Settings.tts_model),
+        tts_quality_model=os.getenv(
+            "TTS_QUALITY_MODEL", Settings.tts_quality_model
+        ),
         tts_voice_design_model=os.getenv(
             "TTS_VOICE_DESIGN_MODEL", Settings.tts_voice_design_model
         ),
@@ -115,6 +122,9 @@ def get_settings() -> Settings:
             "API_EMBEDDING_MODEL", Settings.api_embedding_model
         ),
         api_tts_model=os.getenv("API_TTS_MODEL", Settings.api_tts_model),
+        api_tts_quality_model=os.getenv(
+            "API_TTS_QUALITY_MODEL", Settings.api_tts_quality_model
+        ),
         api_tts_voice_design_model=os.getenv(
             "API_TTS_VOICE_DESIGN_MODEL", Settings.api_tts_voice_design_model
         ),

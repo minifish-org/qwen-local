@@ -11,7 +11,7 @@ def test_audio_speech_regression(client, monkeypatch):
 
     def fake_speech(*, model_id, model_kind, text, voice, instruct, response_format, speed):
         assert model_id == server.settings.tts_model
-        assert model_kind == "custom_voice"
+        assert model_kind == "kokoro"
         assert text == "hello"
         assert voice == "default"
         assert instruct is None
@@ -84,6 +84,38 @@ def test_audio_speech_voice_design_routes_with_instruct(client, monkeypatch):
             "instruct": " natural warm conversational voice ",
             "response_format": "wav",
             "speed": 0.9,
+            "keep_alive": 0,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/wav"
+    assert response.content == audio
+
+
+def test_audio_speech_quality_routes_to_custom_voice_model(client, monkeypatch):
+    audio = b"RIFF....WAVEfmt "
+
+    def fake_speech(*, model_id, model_kind, text, voice, instruct, response_format, speed):
+        assert model_id == server.settings.tts_quality_model
+        assert model_kind == "custom_voice"
+        assert text == "hello"
+        assert voice == "vivian"
+        assert instruct is None
+        assert response_format == "wav"
+        assert speed == 1.0
+        return audio
+
+    monkeypatch.setattr(server.tts_runtime, "speech", fake_speech)
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={
+            "model": server.settings.api_tts_quality_model,
+            "input": "hello",
+            "voice": "vivian",
+            "response_format": "wav",
+            "speed": 1.0,
             "keep_alive": 0,
         },
     )
@@ -261,42 +293,74 @@ def test_audio_speech_accepts_underlying_tts_model_ids(client, monkeypatch):
             "keep_alive": 0,
         },
     )
+    quality_response = client.post(
+        "/v1/audio/speech",
+        json={
+            "model": server.settings.tts_quality_model,
+            "input": "hello",
+            "response_format": "wav",
+            "keep_alive": 0,
+        },
+    )
 
     assert custom_response.status_code == 200
     assert voice_design_response.status_code == 200
+    assert quality_response.status_code == 200
     assert calls == [
-        (server.settings.tts_model, "custom_voice", None),
+        (server.settings.tts_model, "kokoro", None),
         (server.settings.tts_voice_design_model, "voice_design", "natural voice"),
+        (server.settings.tts_quality_model, "custom_voice", None),
     ]
 
 
-def test_models_lists_custom_voice_and_voice_design_aliases(client):
+def test_models_lists_tts_aliases(client):
     response = client.get("/v1/models")
 
     assert response.status_code == 200
     model_ids = {model["id"] for model in response.json()["data"]}
     assert server.settings.api_tts_model in model_ids
+    assert server.settings.api_tts_quality_model in model_ids
     assert server.settings.api_tts_voice_design_model in model_ids
 
 
-def test_tts_provider_switches_model_before_loading_next_backend(monkeypatch):
+def test_tts_provider_switches_backend_by_model_kind(monkeypatch):
     releases = []
+    created = []
 
-    class FakeBackend:
+    class FakeKokoroBackend:
+        def __init__(self, settings, *, model_id):
+            self.model_id = model_id
+            created.append(("kokoro", model_id))
+
+        def speech(self, **kwargs):
+            return f"kokoro:{self.model_id}".encode()
+
+    class FakeQwenBackend:
         def __init__(self, settings, *, model_id, model_kind):
             self.model_id = model_id
             self.model_kind = model_kind
+            created.append(("qwen", model_id, model_kind))
 
         def speech(self, **kwargs):
             return f"{self.model_id}:{self.model_kind}".encode()
 
-    monkeypatch.setattr(tts_module, "MLXAudioQwenTTSBackend", FakeBackend)
+    monkeypatch.setattr(tts_module, "KokoroMLXBackend", FakeKokoroBackend)
+    monkeypatch.setattr(tts_module, "MLXAudioQwenTTSBackend", FakeQwenBackend)
     monkeypatch.setattr(tts_module, "release_mlx_memory", lambda: releases.append("released"))
 
     provider = tts_module.LocalTTSProvider(server.settings)
 
-    custom_audio = provider.speech(
+    kokoro_audio = provider.speech(
         model_id=server.settings.tts_model,
+        model_kind="kokoro",
+        text="hello",
+        voice="default",
+        instruct=None,
+        response_format="wav",
+        speed=1.0,
+    )
+    quality_audio = provider.speech(
+        model_id=server.settings.tts_quality_model,
         model_kind="custom_voice",
         text="hello",
         voice="default",
@@ -304,21 +368,13 @@ def test_tts_provider_switches_model_before_loading_next_backend(monkeypatch):
         response_format="wav",
         speed=1.0,
     )
-    voice_design_audio = provider.speech(
-        model_id=server.settings.tts_voice_design_model,
-        model_kind="voice_design",
-        text="hello",
-        voice="default",
-        instruct="natural voice",
-        response_format="wav",
-        speed=1.0,
-    )
 
-    assert custom_audio == f"{server.settings.tts_model}:custom_voice".encode()
-    assert (
-        voice_design_audio
-        == f"{server.settings.tts_voice_design_model}:voice_design".encode()
-    )
+    assert kokoro_audio == f"kokoro:{server.settings.tts_model}".encode()
+    assert quality_audio == f"{server.settings.tts_quality_model}:custom_voice".encode()
+    assert created == [
+        ("kokoro", server.settings.tts_model),
+        ("qwen", server.settings.tts_quality_model, "custom_voice"),
+    ]
     assert releases == ["released"]
 
 
