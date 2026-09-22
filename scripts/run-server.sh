@@ -13,6 +13,7 @@ if [[ ! -x "$PYTHON" ]]; then
   exit 1
 fi
 
+cd "$ROOT"
 exec "$PYTHON" -m uvicorn \
   local_openai_mlx_provider.server:app \
   --host "$HOST" \

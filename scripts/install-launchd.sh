@@ -30,7 +30,25 @@ if [[ -f "$DST" ]]; then
 fi
 
 rm -f "$DST" "$HOME/Library/LaunchAgents/${LEGACY_LABEL}.plist"
-cp "$SRC" "$DST"
+# Render the template with plistlib so paths containing XML characters are safe.
+python3 - "$SRC" "$DST" "$ROOT" <<'PYTHON'
+import plistlib
+import sys
+from pathlib import Path
+source, destination, project_root = sys.argv[1:]
+with open(source, "rb") as stream:
+    data = plistlib.load(stream)
+def render(value):
+    if isinstance(value, str):
+        return value.replace("__PROJECT_ROOT__", project_root)
+    if isinstance(value, list):
+        return [render(item) for item in value]
+    if isinstance(value, dict):
+        return {key: render(item) for key, item in value.items()}
+    return value
+with open(destination, "wb") as stream:
+    plistlib.dump(render(data), stream)
+PYTHON
 
 launchctl bootstrap "$DOMAIN" "$DST"
 launchctl enable "$DOMAIN/$LABEL"

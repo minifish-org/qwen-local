@@ -1,5 +1,10 @@
 # qwen-local
 
+> **Archived / unmaintained.** Published for historical reference. The maintainer
+> now uses a separate private `local-ai` project, which is not part of this release.
+> No future fixes, compatibility updates, or support are promised.
+
+
 OpenAI-compatible local Qwen service for a 16 GB Apple Silicon Mac.
 
 This project is a thin FastAPI adapter around local MLX models. It runs chat,
@@ -40,7 +45,21 @@ cached.
 - Thinking: disabled in the Qwen chat template
 - Inference worker: single serialized worker for chat, embeddings, TTS, ASR, and translation
 
+## Security and model licensing
+
+This server has **no authentication**. The example `api_key="local"` is a client
+placeholder, not access control. The default binds to `127.0.0.1`; do not expose
+it directly to a LAN or the internet.
+
+Model weights are downloaded separately and are not licensed by this repository.
+In particular, NLLB-200-3.3B uses **CC-BY-NC-4.0** and is not a commercially
+unrestricted model. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Setup
+
+Requires macOS on Apple Silicon, Python 3.12, and sufficient memory and disk
+space for the selected models. Automated tests use mocked inference backends;
+they do not certify model quality or memory usage.
 
 ```sh
 ./scripts/setup.sh
@@ -369,5 +388,11 @@ and one port, and launchd writes stdout/stderr logs under `logs/`.
 - Realtime ASR and streaming ASR are not implemented.
 - Speaker diarization is not implemented.
 - Long-audio chunking is not implemented.
-- Whisper small is the default target for Mac M4 16 GB.
+- The configured ASR default is Whisper large-v3-turbo; memory use depends on the selected model.
 - Chinese and English should both be tested locally for your target audio.
+
+## License and contributions
+
+Project code is licensed under [AGPL-3.0-only](LICENSE). Third-party dependencies
+and model assets retain their own licenses. See [CONTRIBUTING.md](CONTRIBUTING.md)
+and [SECURITY.md](SECURITY.md).
